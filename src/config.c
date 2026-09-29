@@ -101,6 +101,7 @@ void config_load(struct config *c)
 	c->sc_expires = g_key_file_get_int64(kf, "soundcloud", "expires_at",
 					     NULL);
 	c->sc_user = get_int(kf, "soundcloud", "user", 0);
+	c->sc_full_only = get_int(kf, "soundcloud", "full_only", 0);
 
 	c->ndecks = get_int(kf, "decks", "count", 2);
 	c->pitch_range = get_int(kf, "decks", "pitch_range", 8);
@@ -176,6 +177,8 @@ void config_save(const struct config *c)
 			      c->sc_refresh ? c->sc_refresh : "");
 	g_key_file_set_int64(kf, "soundcloud", "expires_at", c->sc_expires);
 	g_key_file_set_integer(kf, "soundcloud", "user", c->sc_user);
+	g_key_file_set_integer(kf, "soundcloud", "full_only",
+			       c->sc_full_only);
 
 	g_key_file_set_integer(kf, "decks", "count", c->ndecks);
 	g_key_file_set_integer(kf, "decks", "pitch_range", c->pitch_range);

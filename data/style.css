@@ -373,6 +373,12 @@ button.automix-toggle:checked {
 	box-shadow: 0 0 14px alpha(@key, 0.7);
 }
 
+button.sc-full:checked {
+	background: alpha(@deck-a, 0.25);
+	border-color: @deck-a;
+	color: @deck-a;
+}
+
 button.queue-button {
 	color: @key;
 	border-color: alpha(@key, 0.5);

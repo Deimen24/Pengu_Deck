@@ -31,6 +31,7 @@ struct config {
 	char *sc_refresh;
 	gint64 sc_expires;	/* unix seconds */
 	gboolean sc_user;	/* the tokens belong to a signed in user */
+	gboolean sc_full_only;	/* hide preview only tracks */
 
 	/* decks */
 	int ndecks;		/* 2 to 4 shown */

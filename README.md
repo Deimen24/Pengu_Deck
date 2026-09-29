@@ -150,7 +150,9 @@ SoundCloud" in the context menu links to the track page. Streams are cached to
 `~/.cache/pengu-deck/soundcloud/` while playing; cached tracks show ⬇
 and the cache can be cleared in Preferences. Tracks limited to previews
 by their rights holders play as 30 s snippets and are marked
-"(preview)".
+"(preview)". SoundCloud decides this per track and per app; "Full tracks"
+next to the search box hides preview only tracks from searches, links and
+likes.
 
 ## Recording, broadcasting, microphone
 

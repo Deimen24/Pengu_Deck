@@ -31,7 +31,18 @@ static const char *token_url(void)
 }
 #define PAGE_LIMIT	50
 #define MAX_TRACKS	200
-#define ACCESS		"access=playable,preview"
+/* Search results: full tracks only, or previews too (the default). */
+static gboolean full_only;
+
+void sc_set_full_only(gboolean on)
+{
+	full_only = on;
+}
+
+static const char *access_filter(void)
+{
+	return full_only ? "access=playable" : "access=playable,preview";
+}
 /* refresh this long before the token actually expires */
 #define EXPIRY_MARGIN	60
 /* after a failed token exchange, wait this long before asking again:
@@ -654,9 +665,9 @@ static GPtrArray *fetch_tracks(const char *first_url, GError **err)
 GPtrArray *sc_search(const char *query, GError **err)
 {
 	char *q = g_uri_escape_string(query, NULL, FALSE);
-	char *url = g_strdup_printf("%s/tracks?q=%s&" ACCESS "&limit=%d"
+	char *url = g_strdup_printf("%s/tracks?q=%s&%s&limit=%d"
 				    "&linked_partitioning=true", api_base(),
-				    q, PAGE_LIMIT);
+				    q, access_filter(), PAGE_LIMIT);
 	char *body = api_get(url, err);
 	GPtrArray *res = body ? sc_parse_tracks(body, err) : NULL;
 
@@ -694,15 +705,16 @@ GPtrArray *sc_resolve(const char *link, GError **err)
 		res = g_ptr_array_new_with_free_func(g_object_unref);
 		add_track_node(res, root);
 	} else if (kind && strcmp(kind, "playlist") == 0 && urn) {
-		url = g_strdup_printf("%s/playlists/%s/tracks?" ACCESS
+		url = g_strdup_printf("%s/playlists/%s/tracks?%s"
 				      "&linked_partitioning=true", api_base(),
-				      urn);
+				      urn, access_filter());
 		res = fetch_tracks(url, err);
 		g_free(url);
 	} else if (kind && strcmp(kind, "user") == 0 && urn) {
-		url = g_strdup_printf("%s/users/%s/tracks?" ACCESS
+		url = g_strdup_printf("%s/users/%s/tracks?%s"
 				      "&limit=%d&linked_partitioning=true",
-				      api_base(), urn, PAGE_LIMIT);
+				      api_base(), urn, access_filter(),
+				      PAGE_LIMIT);
 		res = fetch_tracks(url, err);
 		g_free(url);
 	} else {
@@ -721,8 +733,9 @@ GPtrArray *sc_likes(GError **err)
 				    "Log in to SoundCloud to see your likes.");
 		return NULL;
 	}
-	char *url = g_strdup_printf("%s/me/likes/tracks?" ACCESS "&limit=200"
-				    "&linked_partitioning=true", api_base());
+	char *url = g_strdup_printf("%s/me/likes/tracks?%s&limit=200"
+				    "&linked_partitioning=true", api_base(),
+				    access_filter());
 	GPtrArray *res = fetch_tracks(url, err);
 
 	g_free(url);

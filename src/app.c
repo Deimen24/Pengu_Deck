@@ -44,6 +44,7 @@ void app_init(struct app *a, GtkApplication *gtk)
 		sc_session_set_tokens(&t);
 	}
 	sc_session_set_changed(sc_tokens_changed, a);
+	sc_set_full_only(a->cfg.sc_full_only);
 	a->library = g_list_store_new(PD_TYPE_MEDIA_ITEM);
 	a->sc_results = g_list_store_new(PD_TYPE_MEDIA_ITEM);
 	a->queue = g_list_store_new(PD_TYPE_MEDIA_ITEM);

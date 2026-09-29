@@ -19,6 +19,7 @@ struct _PdScView {
 	GtkWidget *spinner;
 	GtkWidget *likes;
 	GtkWidget *login;
+	GtkWidget *full;
 	GtkWidget *hint;
 	guint pending;
 };
@@ -126,6 +127,17 @@ static void on_likes(GtkButton *b, PdScView *v)
 	run_query(v, QUERY_LIKES, NULL);
 }
 
+/* Full tracks only: rerun the current search under the new filter. */
+static void on_full(GtkToggleButton *b, PdScView *v)
+{
+	struct app *a = v->app;
+
+	a->cfg.sc_full_only = gtk_toggle_button_get_active(b);
+	sc_set_full_only(a->cfg.sc_full_only);
+	config_save(&a->cfg);
+	on_activate(GTK_ENTRY(v->entry), v);
+}
+
 static void login_done(gpointer data)
 {
 	PdScView *v = data;
@@ -191,6 +203,17 @@ GtkWidget *pd_sc_view_new(struct app *app)
 	g_signal_connect(v->entry, "activate", G_CALLBACK(on_activate), v);
 	gtk_box_append(GTK_BOX(bar), v->entry);
 
+	v->full = gtk_toggle_button_new_with_label("Full tracks");
+	gtk_widget_add_css_class(v->full, "sc-full");
+	gtk_widget_set_focusable(v->full, FALSE);
+	gtk_widget_set_tooltip_text(v->full, "Only list tracks SoundCloud "
+				    "lets this app play in full. Off: "
+				    "tracks with a preview snippet are "
+				    "listed too.");
+	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(v->full),
+				     app->cfg.sc_full_only);
+	g_signal_connect(v->full, "toggled", G_CALLBACK(on_full), v);
+	gtk_box_append(GTK_BOX(bar), v->full);
 	gtk_box_append(GTK_BOX(bar), pd_media_view_queue_button(v->media));
 	v->login = gtk_button_new_with_label("Log in to SoundCloud");
 	gtk_widget_add_css_class(v->login, "sc-login");

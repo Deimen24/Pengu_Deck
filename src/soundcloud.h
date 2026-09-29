@@ -71,6 +71,12 @@ char *sc_session_post_grant(const char *grant, char **reply, long *status,
 
 /* ---- content ----------------------------------------------------- */
 
+/*
+ * Only list tracks SoundCloud lets the app play in full (access
+ * "playable"); off, preview only tracks are listed as well.
+ */
+void sc_set_full_only(gboolean on);
+
 GPtrArray *sc_search(const char *query, GError **err);
 GPtrArray *sc_resolve(const char *url, GError **err);
 GPtrArray *sc_likes(GError **err);
