@@ -491,8 +491,9 @@ listview.queue-list > row:selected {
 
 columnview.data-table > listview > row.played,
 listview.queue-list > row.played {
-	background: linear-gradient(90deg, alpha(@dim, 0.10),
-				    alpha(@dim, 0.0));
+	background: linear-gradient(90deg, alpha(@dim, 0.24),
+				    alpha(@dim, 0.02));
+	box-shadow: inset 3px 0 0 alpha(@dim, 0.7);
 }
 
 row.played .row-title {
