@@ -105,6 +105,7 @@ void config_load(struct config *c)
 
 	c->automix_fade = CLAMP(get_int(kf, "automix", "fade", 12), 2, 90);
 	c->automix_sync = get_int(kf, "automix", "sync", 1);
+	c->automix_auto = get_int(kf, "automix", "auto", 1);
 	for (i = 0; i < 8; i++) {
 		char name[8];
 
@@ -173,6 +174,7 @@ void config_save(const struct config *c)
 
 	g_key_file_set_integer(kf, "automix", "fade", c->automix_fade);
 	g_key_file_set_integer(kf, "automix", "sync", c->automix_sync);
+	g_key_file_set_integer(kf, "automix", "auto", c->automix_auto);
 	for (i = 0; i < 8; i++) {
 		char name[8];
 

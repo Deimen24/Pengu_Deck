@@ -36,8 +36,9 @@ struct config {
 	gboolean autogain;
 
 	/* automix */
-	int automix_fade;	/* seconds */
+	int automix_fade;	/* seconds, or the base length when auto */
 	gboolean automix_sync;
+	gboolean automix_auto;	/* size transitions from the tracks */
 
 	/* sampler */
 	char *samples[8];

@@ -458,3 +458,81 @@ float analyze_gain(const struct track *t)
 	rms_db = (float)(10.0 * log10(sum / (double)(frames / 4 + 1) + 1e-12));
 	return CLAMP(-18.0f - rms_db, -12.0f, 12.0f);
 }
+
+/* ---- energy profile ---------------------------------------------- */
+
+#define QUIET_RATIO	0.45
+#define MAX_QUIET_SECS	60.0
+
+static int cmp_double_asc(const void *a, const void *b)
+{
+	double x = *(const double *)a, y = *(const double *)b;
+
+	return x < y ? -1 : x > y;
+}
+
+/* Mean peak level per second from the waveform bins. */
+static double *seconds_profile(const struct track *t, size_t *n,
+			       double *threshold)
+{
+	size_t bins = track_bins(t), per_sec = t->rate / WAVE_BIN_FRAMES;
+	size_t secs, i, j;
+	double *e, *sorted;
+
+	if (!per_sec || bins < per_sec * 4)
+		return NULL;
+	secs = bins / per_sec;
+	e = malloc(secs * sizeof(*e));
+	sorted = malloc(secs * sizeof(*sorted));
+	if (!e || !sorted) {
+		free(e);
+		free(sorted);
+		return NULL;
+	}
+	for (i = 0; i < secs; i++) {
+		double acc = 0.0;
+
+		for (j = 0; j < per_sec; j++)
+			acc += track_bin(t, i * per_sec + j)->peak;
+		e[i] = acc / per_sec;
+	}
+	memcpy(sorted, e, secs * sizeof(*e));
+	qsort(sorted, secs, sizeof(*sorted), cmp_double_asc);
+	*threshold = sorted[secs / 2] * QUIET_RATIO;
+	free(sorted);
+	*n = secs;
+	return e;
+}
+
+double analyze_quiet_tail(const struct track *t)
+{
+	size_t n, i;
+	double thr, *e;
+	double quiet = 0.0;
+
+	if (!track_done(t))
+		return 0.0;
+	e = seconds_profile(t, &n, &thr);
+	if (!e)
+		return 0.0;
+	for (i = n; i > 0 && e[i - 1] < thr && quiet < MAX_QUIET_SECS; i--)
+		quiet += 1.0;
+	free(e);
+	return quiet;
+}
+
+double analyze_quiet_head(const struct track *t, size_t from)
+{
+	size_t n, i, start;
+	double thr, *e;
+	double quiet = 0.0;
+
+	e = seconds_profile(t, &n, &thr);
+	if (!e)
+		return 0.0;
+	start = from / t->rate;
+	for (i = start; i < n && e[i] < thr && quiet < MAX_QUIET_SECS; i++)
+		quiet += 1.0;
+	free(e);
+	return quiet;
+}

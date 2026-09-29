@@ -5,11 +5,17 @@
 #include <math.h>
 #include <stdarg.h>
 
+#include "analyze.h"
 #include "automix.h"
 
 #define TICK_MS		100
 #define PRELOAD_SECS	20.0	/* load the next track this early */
 #define DECKS_USED	2	/* A and B */
+#define FADE_MIN	3.0
+#define FADE_MAX	45.0
+#define OUTRO_MAX	30.0
+#define BLEND_BEATS	16.0	/* beat matched blends */
+#define CUT_MAX		8.0	/* when tempos cannot be matched */
 
 enum state {
 	AM_IDLE,		/* nothing playing, waiting for the queue */
@@ -29,6 +35,9 @@ static struct {
 	double fade_from;
 	double fade_to;
 	bool force;		/* automix_next(): fade as soon as loaded */
+	double plan_len;	/* transition length for the next fade */
+	double plan_start;	/* where the next track starts, frames */
+	bool planned;
 	char status[160];
 } am;
 
@@ -107,12 +116,63 @@ static bool load_next(int i)
 	return true;
 }
 
-static void start_deck(int i)
+static void start_deck(int i, double at)
 {
 	struct deck *d = deck(i);
 
-	deck_seek(d, d->cue);
+	deck_seek(d, at >= 0.0 ? at : d->cue);
 	deck_play(d, true);
+}
+
+/* Pitch the incoming deck would need to match the outgoing one. */
+static bool tempo_matchable(int from, int to)
+{
+	double p = deck_sync_pitch(deck(to), deck(from));
+	double range = am.app->cfg.pitch_range / 100.0;
+
+	return !isnan(p) && fabs(p) <= range;
+}
+
+/*
+ * Size the transition from the two tracks: a beat matched blend of
+ * BLEND_BEATS when the tempos fit, stretched to cover a quiet outro of
+ * the outgoing track, or a short cut when they do not.  A long quiet
+ * intro of the incoming track is skipped so its first drop lands as the
+ * outgoing track ends.
+ */
+static void plan_transition(int from, int to)
+{
+	struct config *c = &am.app->cfg;
+	struct track *tf = deck_track(deck(from)), *tt = deck_track(deck(to));
+	double len = c->automix_fade;
+	double outro = 0.0, intro = 0.0, bpm = 0.0;
+	bool match;
+
+	am.plan_len = len;
+	am.plan_start = -1.0;
+	am.planned = true;
+	if (!c->automix_auto || !tf || !tt)
+		return;
+
+	match = c->automix_sync && tempo_matchable(from, to);
+	bpm = deck_bpm(deck(from));
+	outro = analyze_quiet_tail(tf);
+	intro = analyze_quiet_head(tt, (size_t)deck(to)->cue);
+
+	if (match && bpm > 0.0)
+		len = fmax(len, BLEND_BEATS * 60.0 / bpm);
+	if (outro >= 4.0)
+		len = fmax(len, fmin(outro, OUTRO_MAX));
+	if (!match)
+		len = fmin(len, CUT_MAX);
+	len = CLAMP(len, FADE_MIN, FADE_MAX);
+
+	/* Never fade longer than what is left of the outgoing track. */
+	len = fmin(len, fmax(FADE_MIN, remaining(from) - 0.5));
+
+	if (deck(to)->cue <= 0.0 && intro > len + 4.0)
+		am.plan_start = (intro - len) * tt->rate;
+	am.plan_len = len;
 }
 
 static void begin_fade(void)
@@ -126,7 +186,9 @@ static void begin_fade(void)
 		if (!isnan(p) && fabs(p) <= range)
 			atomic_store(&to->pitch, (float)p);
 	}
-	start_deck(am.next);
+	if (!am.planned)
+		plan_transition(am.active, am.next);
+	start_deck(am.next, am.plan_start);
 	if (am.app->cfg.automix_sync)
 		deck_sync_phase(to, from);
 
@@ -134,6 +196,7 @@ static void begin_fade(void)
 	am.fade_from = atomic_load(&am.app->engine.xfader);
 	am.fade_to = side_value(am.next);
 	am.state = AM_FADING;
+	am.planned = false;
 }
 
 static void end_fade(void)
@@ -191,7 +254,7 @@ static void tick_playing(void)
 			return;
 		}
 		if (loaded(am.active) && remaining(am.active) > 1.0)
-			start_deck(am.active);
+			start_deck(am.active, -1.0);
 		else if (loaded(am.active)) {
 			/* Ended without a next track: go straight on. */
 			am.state = AM_IDLE;
@@ -202,7 +265,9 @@ static void tick_playing(void)
 	set_status("Automix: deck %c, %d s left",
 		   app_deck_letter(am.active), (int)remaining(am.active));
 
-	if (remaining(am.active) > PRELOAD_SECS + am.app->cfg.automix_fade)
+	if (remaining(am.active) > PRELOAD_SECS + (am.app->cfg.automix_auto ?
+						   FADE_MAX :
+						   am.app->cfg.automix_fade))
 		return;
 	if (atomic_load(&deck(other)->playing) || am.app->loading[other])
 		return;
@@ -210,6 +275,7 @@ static void tick_playing(void)
 		return;
 	am.next = other;
 	am.state = AM_PRELOADED;
+	am.planned = false;
 }
 
 static void tick_preloaded(void)
@@ -221,13 +287,23 @@ static void tick_preloaded(void)
 		am.state = AM_PLAYING;
 		return;
 	}
-	set_status("Automix: deck %c, %d s left, %c is next",
-		   app_deck_letter(am.active), (int)remaining(am.active),
-		   app_deck_letter(am.next));
-	if (!loaded(am.next))
+	if (!loaded(am.next)) {
+		set_status("Automix: deck %c, %d s left, loading %c",
+			   app_deck_letter(am.active),
+			   (int)remaining(am.active),
+			   app_deck_letter(am.next));
 		return;
+	}
+	/* Plan once both tracks are fully known, re-plan when it changes. */
+	if (!am.planned || (am.app->cfg.automix_auto &&
+			    track_done(deck_track(deck(am.next))) &&
+			    am.plan_len == am.app->cfg.automix_fade))
+		plan_transition(am.active, am.next);
+	set_status("Automix: deck %c, %d s left, %c next, %d s blend",
+		   app_deck_letter(am.active), (int)remaining(am.active),
+		   app_deck_letter(am.next), (int)am.plan_len);
 	if (am.force || !atomic_load(&deck(am.active)->playing) ||
-	    remaining(am.active) <= am.app->cfg.automix_fade) {
+	    remaining(am.active) <= am.plan_len) {
 		am.force = false;
 		begin_fade();
 	}
@@ -235,7 +311,7 @@ static void tick_preloaded(void)
 
 static void tick_fading(void)
 {
-	double secs = am.app->cfg.automix_fade;
+	double secs = am.plan_len > 0.0 ? am.plan_len : am.app->cfg.automix_fade;
 	double t = (g_get_monotonic_time() - am.fade_start) / 1e6 / secs;
 	double x;
 
@@ -243,8 +319,9 @@ static void tick_fading(void)
 		t = 1.0;
 	x = am.fade_from + (am.fade_to - am.fade_from) * t;
 	atomic_store(&am.app->engine.xfader, (float)x);
-	set_status("Automix: mixing %c → %c", app_deck_letter(am.active),
-		   app_deck_letter(am.next));
+	set_status("Automix: mixing %c → %c over %d s",
+		   app_deck_letter(am.active), app_deck_letter(am.next),
+		   (int)secs);
 	if (t >= 1.0)
 		end_fade();
 }

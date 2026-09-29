@@ -149,14 +149,28 @@ see `.github/workflows/ci.yml`.
 
 Open the **Automix** tab, add tracks with the **+ Queue** button in the
 Library or SoundCloud tab (or right click → "Add to automix queue", or
-drag them onto the panel), set the transition length and press
-**AUTOMIX**. The queue plays alternately on decks A and B: the next
-track is loaded ~20 s before the current one ends, started at its cue
-point when the transition begins (tempo matched if the pitch range
-allows it) and the crossfader glides over. You can still touch every
-knob and fader during a transition; **Next ⏭** mixes into the next
-track right away. Queued SoundCloud tracks are downloaded as soon as
-they are queued so the transition never waits for the network.
+drag them onto the panel) and press **AUTOMIX**. The queue plays
+alternately on decks A and B: the next track is loaded early, started
+at its cue point when the transition begins (tempo matched if the
+pitch range allows it) and the crossfader glides over. You can still
+touch every knob and fader during a transition; **Next ⏭** mixes into
+the next track right away. Queued SoundCloud tracks are downloaded as
+soon as they are queued so the transition never waits for the network.
+
+With **Auto length** ticked (the default) every transition is sized
+from the two tracks instead of the fixed slider value:
+
+- tempos that can be matched get a beat aligned blend of at least
+  16 beats (7.5 s at 128 BPM, longer at slower tempos);
+- a quiet outro on the ending track stretches the blend to cover it,
+  up to 30 s, so a long fade out is never played over silence;
+- tracks whose tempos are too far apart to sync are cut within 8 s;
+- a long quiet intro on the incoming track is skipped when it has no
+  cue point, so the new track comes in where it has energy.
+
+The result is clamped to 3–45 s and to what is left of the outgoing
+track; the status line shows the planned length ("15 s blend") as soon
+as the next track is loaded.
 
 ## MIDI controllers
 

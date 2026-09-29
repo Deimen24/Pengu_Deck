@@ -119,6 +119,12 @@ static void on_fade(GtkSpinButton *s, PdQueueView *v)
 	config_save(&v->app->cfg);
 }
 
+static void on_auto(GtkCheckButton *c, PdQueueView *v)
+{
+	v->app->cfg.automix_auto = gtk_check_button_get_active(c);
+	config_save(&v->app->cfg);
+}
+
 static void on_sync(GtkCheckButton *c, PdQueueView *v)
 {
 	v->app->cfg.automix_sync = gtk_check_button_get_active(c);
@@ -225,6 +231,18 @@ GtkWidget *pd_queue_view_new(struct app *app)
 	l = gtk_label_new("s");
 	gtk_widget_add_css_class(l, "dim-label");
 	gtk_box_append(GTK_BOX(bar), l);
+
+	check = gtk_check_button_new_with_label("Auto length");
+	gtk_check_button_set_active(GTK_CHECK_BUTTON(check),
+				    app->cfg.automix_auto);
+	gtk_widget_set_tooltip_text(check, "Size each transition from the "
+				    "tracks: long beat matched blends when "
+				    "the tempos fit, the whole outro when a "
+				    "track winds down, short cuts otherwise; "
+				    "the seconds above are the minimum");
+	gtk_widget_set_margin_start(check, 12);
+	g_signal_connect(check, "toggled", G_CALLBACK(on_auto), v);
+	gtk_box_append(GTK_BOX(bar), check);
 
 	check = gtk_check_button_new_with_label("Sync tempo");
 	gtk_check_button_set_active(GTK_CHECK_BUTTON(check),

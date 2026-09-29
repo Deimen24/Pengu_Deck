@@ -322,6 +322,31 @@ static void test_encoder(void)
 	g_free(path);
 }
 
+static void test_quiet_edges(void)
+{
+	struct track *t = track_new("mem", "mem", RATE);
+	size_t n = 40 * RATE, i;
+	int16_t *pcm = g_new0(int16_t, 2 * n);
+
+	/* 6 s of near silence, 26 s of music, 8 s of quiet outro */
+	for (i = 0; i < n; i++) {
+		double s = (double)i / RATE;
+		double amp = s < 6.0 ? 0.02 : s < 32.0 ? 0.8 : 0.05;
+
+		pcm[2 * i] = pcm[2 * i + 1] =
+			(int16_t)(sin(2 * M_PI * 110 * s) * amp * 20000);
+	}
+	track_append(t, pcm, n);
+	atomic_store(&t->state, TRACK_DECODED);
+	g_free(pcm);
+	g_assert_cmpfloat(analyze_quiet_tail(t), >=, 7.0);
+	g_assert_cmpfloat(analyze_quiet_tail(t), <=, 9.0);
+	g_assert_cmpfloat(analyze_quiet_head(t, 0), >=, 5.0);
+	g_assert_cmpfloat(analyze_quiet_head(t, 0), <=, 7.0);
+	g_assert_cmpfloat(analyze_quiet_head(t, 10 * RATE), ==, 0.0);
+	track_unref(t);
+}
+
 static void test_bpm_fold(void)
 {
 	g_assert_cmpfloat(bpm_fold(64.0), ==, 128.0);
@@ -580,6 +605,7 @@ int main(int argc, char **argv)
 	g_test_add_func("/library/rekordbox", test_rekordbox);
 	g_test_add_func("/sampler/oneshot", test_sampler);
 	g_test_add_func("/analyze/gain", test_gain);
+	g_test_add_func("/analyze/quiet-edges", test_quiet_edges);
 	g_test_add_func("/dsp/biquad", test_biquad);
 	g_test_add_func("/deck/play", test_deck_play);
 	g_test_add_func("/deck/seek-loading", test_seek_while_loading);

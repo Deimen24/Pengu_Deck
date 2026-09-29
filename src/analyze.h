@@ -32,4 +32,12 @@ int key_distance(int key, int target);
 /* Replay gain in dB that brings the track to -18 dBFS RMS. */
 float analyze_gain(const struct track *t);
 
+/*
+ * Quiet outro / intro in seconds: how long the level stays well below
+ * the track's typical level at the end (needs a fully decoded track) or
+ * from frame @from on.  Used by automix to size transitions.
+ */
+double analyze_quiet_tail(const struct track *t);
+double analyze_quiet_head(const struct track *t, size_t from);
+
 #endif /* PD_ANALYZE_H */
