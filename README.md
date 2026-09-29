@@ -61,7 +61,7 @@ install `pipewire-jack` and pick the JACK backend in Preferences.
 ```sh
 sudo dnf install gcc meson ninja-build gtk4-devel json-glib-devel \
     libcurl-devel rubberband-devel pulseaudio-libs-devel alsa-lib-devel \
-    ffmpeg-devel      # from RPM Fusion for MP3/AAC
+    ffmpeg-free-devel
 meson setup build && meson compile -C build && sudo meson install -C build
 ```
 

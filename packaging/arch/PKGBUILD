@@ -16,12 +16,6 @@ optdepends=('pipewire-pulse: PipeWire output (default on CachyOS)'
 source=()
 sha256sums=()
 
-pkgver() {
-	cd "$startdir/../.."
-	git describe --tags --long 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' \
-		|| echo "$pkgver"
-}
-
 build() {
 	arch-meson "$startdir/../.." build -Dkeylock=enabled
 	meson compile -C build
