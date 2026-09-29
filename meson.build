@@ -59,6 +59,7 @@ core_src = files(
 	'src/media.c',
 	'src/miniaudio_impl.c',
 	'src/net.c',
+	'src/playlists.c',
 	'src/sampler.c',
 	'src/soundcloud.c',
 	'src/track.c',

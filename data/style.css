@@ -799,3 +799,42 @@ notebook > header tab:checked {
 notebook > header tab:hover {
 	background: alpha(@raised, 0.6);
 }
+
+/* ---- library sidebar --------------------------------------------- */
+
+.side-panel {
+	background: @panel;
+	border: 1px solid @line;
+	border-radius: 10px;
+	padding: 6px;
+}
+
+listbox.sidebar {
+	background: transparent;
+}
+
+listbox.sidebar > row.side-row {
+	padding: 6px 8px;
+	border-radius: 8px;
+	color: @dim;
+}
+
+listbox.sidebar > row.side-row:selected {
+	background: alpha(@deck-a, 0.2);
+	color: @fg;
+}
+
+listbox.sidebar > row.side-row:hover {
+	background: alpha(@raised, 0.7);
+}
+
+button.side-new {
+	font-size: 11px;
+	color: @deck-a;
+	border-color: alpha(@deck-a, 0.4);
+}
+
+button.destructive {
+	color: @rec;
+	border-color: alpha(@rec, 0.5);
+}

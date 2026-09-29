@@ -9,6 +9,7 @@
 #include "decoder.h"
 #include "library.h"
 #include "net.h"
+#include "playlists.h"
 #include "sccache.h"
 
 static void queue_changed(GListModel *m, guint pos, guint removed,
@@ -25,6 +26,7 @@ void app_init(struct app *a, GtkApplication *gtk)
 	for (i = 0; i < ENGINE_DECKS; i++)
 		atomic_store(&a->engine.deck[i].keylock, a->cfg.keylock);
 	cuestore_open();
+	playlists_open();
 	net_init();
 	a->library = g_list_store_new(PD_TYPE_MEDIA_ITEM);
 	a->sc_results = g_list_store_new(PD_TYPE_MEDIA_ITEM);
@@ -44,6 +46,7 @@ void app_shutdown(struct app *a)
 	for (i = 0; i < ENGINE_DECKS; i++)
 		app_save_cues(a, i);
 	engine_fini(&a->engine);
+	playlists_close();
 	cuestore_close();
 	config_save(&a->cfg);
 	config_clear(&a->cfg);
@@ -314,6 +317,7 @@ static void load_item(struct app *a, int idx, PdMediaItem *m)
 void app_load_item(struct app *a, int idx, PdMediaItem *m)
 {
 	mark_played(a, m);
+	history_add(m);
 	load_item(a, idx, m);
 }
 

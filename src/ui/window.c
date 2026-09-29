@@ -6,6 +6,7 @@
 #include "libview.h"
 #include "mixerview.h"
 #include "pd-build.h"
+#include "playlists.h"
 #include "prefs.h"
 #include "queueview.h"
 #include "samplerview.h"
@@ -287,6 +288,92 @@ static void on_open_file(GObject *src, GAsyncResult *res, gpointer data)
 	g_object_unref(f);
 }
 
+struct rb_job {
+	PdWindow *w;
+	char *path;
+	struct rb_import out;
+	GError *err;
+};
+
+static gboolean rb_done(gpointer data)
+{
+	struct rb_job *j = data;
+	struct app *a = j->w->app;
+	guint i, added = 0;
+
+	if (j->err) {
+		app_toast(a, "Import failed: %s", j->err->message);
+		g_clear_error(&j->err);
+	} else {
+		GHashTable *known = g_hash_table_new(g_str_hash, g_str_equal);
+		guint n = g_list_model_get_n_items(G_LIST_MODEL(a->library));
+
+		for (i = 0; i < n; i++) {
+			PdMediaItem *m = g_list_model_get_item(
+					G_LIST_MODEL(a->library), i);
+
+			g_hash_table_add(known, m->key);
+			g_object_unref(m);
+		}
+		for (i = 0; i < j->out.tracks->len; i++) {
+			PdMediaItem *m = j->out.tracks->pdata[i];
+
+			if (!g_hash_table_contains(known, m->key) &&
+			    g_file_test(m->location, G_FILE_TEST_EXISTS)) {
+				g_list_store_append(a->library, m);
+				added++;
+			}
+		}
+		g_hash_table_unref(known);
+		app_toast(a, "Rekordbox: %u tracks (%u new here), %u cue "
+			  "points, %u playlists imported",
+			  j->out.tracks->len, added, j->out.cues,
+			  j->out.playlists);
+	}
+	rb_import_clear(&j->out);
+	g_free(j->path);
+	g_object_unref(j->w);
+	g_free(j);
+	return G_SOURCE_REMOVE;
+}
+
+static gpointer rb_thread(gpointer data)
+{
+	struct rb_job *j = data;
+
+	rekordbox_import(j->path, &j->out, &j->err);
+	g_idle_add(rb_done, j);
+	return NULL;
+}
+
+static void on_rb_file(GObject *src, GAsyncResult *res, gpointer data)
+{
+	PdWindow *w = data;
+	GFile *f = gtk_file_dialog_open_finish(GTK_FILE_DIALOG(src), res,
+					       NULL);
+	struct rb_job *j;
+
+	if (!f)
+		return;
+	j = g_new0(struct rb_job, 1);
+	j->w = g_object_ref(w);
+	j->path = g_file_get_path(f);
+	g_object_unref(f);
+	app_toast(w->app, "Importing Rekordbox collection…");
+	g_thread_unref(g_thread_new("pd-rekordbox", rb_thread, j));
+}
+
+static void on_import_rb(GSimpleAction *a, GVariant *p, gpointer data)
+{
+	PdWindow *w = data;
+	GtkFileDialog *d = gtk_file_dialog_new();
+
+	gtk_file_dialog_set_title(d, "Import Rekordbox XML (File → Export "
+				  "Collection in xml format)");
+	gtk_file_dialog_open(d, GTK_WINDOW(w), NULL, on_rb_file, w);
+	g_object_unref(d);
+}
+
 static void on_open(GSimpleAction *a, GVariant *p, gpointer data)
 {
 	PdWindow *w = data;
@@ -315,6 +402,7 @@ static GtkWidget *build_header(PdWindow *w)
 	gtk_box_append(GTK_BOX(brand), title);
 	gtk_header_bar_set_title_widget(GTK_HEADER_BAR(hb), brand);
 	g_menu_append(menu, "Open file…", "win.open");
+	g_menu_append(menu, "Import Rekordbox XML…", "win.import-rekordbox");
 	g_menu_append(menu, "Preferences", "win.prefs");
 	g_menu_append(menu, "Keyboard shortcuts", "win.shortcuts");
 	g_menu_append(menu, "About", "win.about");
@@ -403,6 +491,7 @@ GtkWidget *pd_window_new(struct app *app)
 	GtkEventController *keys = gtk_event_controller_key_new();
 	static const GActionEntry entries[] = {
 		{ "open", on_open },
+		{ "import-rekordbox", on_import_rb },
 		{ "prefs", on_prefs },
 		{ "about", on_about },
 		{ "shortcuts", on_shortcuts },

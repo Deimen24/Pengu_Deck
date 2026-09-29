@@ -11,11 +11,13 @@
 #include <glib/gstdio.h>
 
 #include "analyze.h"
+#include "cuestore.h"
 #include "decoder.h"
 #include "deck.h"
 #include "dsp.h"
 #include "engine.h"
 #include "fx.h"
+#include "playlists.h"
 #include "sampler.h"
 #include "soundcloud.h"
 #include "track.h"
@@ -219,6 +221,64 @@ static void test_sampler(void)
 		sampler_render(&s, out, 256);
 	g_assert_false(atomic_load(&s.pad[0].playing));
 	sampler_fini(&s);
+}
+
+static void test_rekordbox(void)
+{
+	static const char xml[] =
+		"<?xml version=\"1.0\"?><DJ_PLAYLISTS Version=\"1.0.0\">"
+		"<COLLECTION Entries=\"1\">"
+		"<TRACK TrackID=\"7\" Name=\"Song\" Artist=\"DJ X\" "
+		"Album=\"LP\" Genre=\"Techno\" AverageBpm=\"128.00\" "
+		"TotalTime=\"300\" Location=\"file://localhost/tmp/My%20Song.mp3\">"
+		"<TEMPO Inizio=\"0.250\" Bpm=\"128.00\" Metro=\"4/4\" Battito=\"1\"/>"
+		"<POSITION_MARK Name=\"\" Type=\"0\" Start=\"1.500\" Num=\"-1\"/>"
+		"<POSITION_MARK Name=\"\" Type=\"0\" Start=\"30.000\" Num=\"0\"/>"
+		"<POSITION_MARK Name=\"\" Type=\"0\" Start=\"60.000\" Num=\"2\"/>"
+		"</TRACK></COLLECTION>"
+		"<PLAYLISTS><NODE Type=\"0\" Name=\"ROOT\" Count=\"1\">"
+		"<NODE Name=\"Peak time\" Type=\"1\" KeyType=\"0\" Entries=\"1\">"
+		"<TRACK Key=\"7\"/></NODE></NODE></PLAYLISTS></DJ_PLAYLISTS>";
+	char *path = g_build_filename(g_get_tmp_dir(), "pd-rb.xml", NULL);
+	struct rb_import out;
+	struct track_info info;
+	struct playlist *p;
+	GError *err = NULL;
+	PdMediaItem *m;
+
+	g_setenv("XDG_DATA_HOME", g_get_tmp_dir(), TRUE);
+	cuestore_open();
+	playlists_open();
+	g_assert_true(g_file_set_contents(path, xml, -1, NULL));
+	g_assert_true(rekordbox_import(path, &out, &err));
+	g_assert_no_error(err);
+	g_assert_cmpuint(out.tracks->len, ==, 1);
+	g_assert_cmpuint(out.cues, ==, 3);
+	g_assert_cmpuint(out.playlists, ==, 1);
+	m = out.tracks->pdata[0];
+	g_assert_cmpstr(m->key, ==, "/tmp/My Song.mp3");
+	g_assert_cmpstr(m->artist, ==, "DJ X");
+	g_assert_true(cuestore_get("/tmp/My Song.mp3", &info));
+	g_assert_cmpfloat(info.bpm, ==, 128.0);
+	g_assert_cmpfloat(info.beat_offset, ==, 0.25);
+	g_assert_cmpfloat(info.cue, ==, 1.5);
+	g_assert_cmpfloat(info.hotcue[0], ==, 30.0);
+	g_assert_cmpfloat(info.hotcue[2], ==, 60.0);
+	g_assert_cmpfloat(info.hotcue[1], <, 0.0);
+	p = playlists_find("Peak time");
+	g_assert_nonnull(p);
+	g_assert_cmpuint(g_list_model_get_n_items(G_LIST_MODEL(p->items)),
+			 ==, 1);
+	playlists_add(p, m);	/* duplicate is ignored */
+	g_assert_cmpuint(g_list_model_get_n_items(G_LIST_MODEL(p->items)),
+			 ==, 1);
+	rb_import_clear(&out);
+	playlists_delete("Peak time");
+	g_assert_null(playlists_find("Peak time"));
+	playlists_close();
+	cuestore_close();
+	g_unlink(path);
+	g_free(path);
 }
 
 static void test_bpm_fold(void)
@@ -475,6 +535,7 @@ int main(int argc, char **argv)
 	g_test_add_func("/analyze/fold", test_bpm_fold);
 	g_test_add_func("/analyze/key", test_key);
 	g_test_add_func("/fx/all", test_fx);
+	g_test_add_func("/library/rekordbox", test_rekordbox);
 	g_test_add_func("/sampler/oneshot", test_sampler);
 	g_test_add_func("/analyze/gain", test_gain);
 	g_test_add_func("/dsp/biquad", test_biquad);

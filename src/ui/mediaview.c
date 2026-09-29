@@ -29,6 +29,7 @@ struct _PdMediaView {
 	char **terms;
 	double bpm_lo, bpm_hi;		/* from a bpm: token, 0 when unused */
 	char *key_filter;		/* Camelot code, lower case */
+	struct playlist *playlist;	/* when showing a playlist */
 };
 
 G_DEFINE_FINAL_TYPE(PdMediaView, pd_media_view, GTK_TYPE_BOX)
@@ -444,6 +445,41 @@ static void on_cache(GSimpleAction *a, GVariant *p, gpointer data)
 		sccache_fetch(m);
 }
 
+static void on_add_to_playlist(GSimpleAction *a, GVariant *p, gpointer data)
+{
+	PdMediaView *v = data;
+	PdMediaItem *m = selected(v);
+	const char *name = g_variant_get_string(p, NULL);
+	struct playlist *pl = playlists_find(name);
+
+	if (m && pl) {
+		playlists_add(pl, m);
+		app_toast(v->app, "Added to \"%s\"", name);
+	}
+}
+
+static void on_remove_from_playlist(GSimpleAction *a, GVariant *p,
+				    gpointer data)
+{
+	PdMediaView *v = data;
+	PdMediaItem *m = selected(v);
+	guint n, i;
+
+	if (!m || !v->playlist)
+		return;
+	n = g_list_model_get_n_items(G_LIST_MODEL(v->playlist->items));
+	for (i = 0; i < n; i++) {
+		PdMediaItem *x = g_list_model_get_item(
+				G_LIST_MODEL(v->playlist->items), i);
+
+		g_object_unref(x);
+		if (x == m) {
+			playlists_remove(v->playlist, i);
+			return;
+		}
+	}
+}
+
 static void on_open_link(GSimpleAction *a, GVariant *p, gpointer data)
 {
 	PdMediaItem *m = selected(data);
@@ -487,6 +523,28 @@ static GMenuModel *build_menu(PdMediaView *v)
 	}
 	g_menu_append(menu, "Pre-listen in headphones", "media.preview");
 	g_menu_append(menu, "Add to automix queue", "media.queue");
+	{
+		GPtrArray *lists = playlists_all();
+		GMenu *sub = g_menu_new();
+		guint k;
+
+		for (k = 0; lists && k < lists->len; k++) {
+			struct playlist *pl = lists->pdata[k];
+			GMenuItem *item = g_menu_item_new(pl->name, NULL);
+
+			g_menu_item_set_action_and_target(item,
+					"media.playlist", "s", pl->name);
+			g_menu_append_item(sub, item);
+			g_object_unref(item);
+		}
+		if (lists && lists->len)
+			g_menu_append_submenu(menu, "Add to playlist",
+					      G_MENU_MODEL(sub));
+		g_object_unref(sub);
+		if (v->playlist)
+			g_menu_append(menu, "Remove from this playlist",
+				      "media.unplaylist");
+	}
 	if (v->store == v->app->sc_results) {
 		g_menu_append(menu, "Download to cache", "media.cache");
 		g_menu_append(menu, "Open on SoundCloud", "media.open-link");
@@ -515,6 +573,8 @@ static GtkWidget *build_popover(PdMediaView *v)
 		{ "load", on_load_deck, "i" },
 		{ "queue", on_queue },
 		{ "preview", on_preview },
+		{ "playlist", on_add_to_playlist, "s" },
+		{ "unplaylist", on_remove_from_playlist },
 		{ "cache", on_cache },
 		{ "open-link", on_open_link },
 	};
@@ -675,6 +735,40 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 GtkWidget *pd_media_view_search_entry(PdMediaView *v)
 {
 	return v->search;
+}
+
+GListStore *pd_media_view_store(PdMediaView *v)
+{
+	return v->store;
+}
+
+void pd_media_view_set_store(PdMediaView *v, GListStore *store,
+			     struct playlist *playlist)
+{
+	GtkFilter *filter = gtk_filter_list_model_get_filter(v->filtered);
+
+	if (store == v->store && playlist == v->playlist)
+		return;
+	g_signal_handlers_disconnect_by_data(v->selection, v);
+	v->store = store;
+	v->playlist = playlist;
+	g_object_ref(filter);
+	g_clear_object(&v->selection);
+	g_clear_object(&v->sorted);
+	g_clear_object(&v->filtered);
+	v->filtered = gtk_filter_list_model_new(
+			G_LIST_MODEL(g_object_ref(store)), filter);
+	gtk_filter_list_model_set_incremental(v->filtered, TRUE);
+	v->sorted = gtk_sort_list_model_new(G_LIST_MODEL(v->filtered),
+			g_object_ref(gtk_column_view_get_sorter(
+					GTK_COLUMN_VIEW(v->view))));
+	v->selection = gtk_single_selection_new(G_LIST_MODEL(v->sorted));
+	gtk_single_selection_set_autoselect(v->selection, FALSE);
+	gtk_column_view_set_model(GTK_COLUMN_VIEW(v->view),
+				  GTK_SELECTION_MODEL(v->selection));
+	g_signal_connect(v->selection, "items-changed",
+			 G_CALLBACK(on_items_changed), v);
+	on_items_changed(G_LIST_MODEL(v->selection), 0, 0, 0, v);
 }
 
 void pd_media_view_set_filter(PdMediaView *v, const char *text)
