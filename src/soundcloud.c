@@ -319,7 +319,7 @@ static gboolean token_request(const char *grant, gboolean user, GError **err)
 			if (why) {
 				g_clear_error(err);
 				g_set_error(err, SC_ERROR, SC_ERROR_AUTH,
-					    "SoundCloud: %s", why);
+					    "%s", why);
 			}
 			if (r)
 				json_node_unref(r);
