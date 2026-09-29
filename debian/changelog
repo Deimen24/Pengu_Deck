@@ -1,3 +1,13 @@
+pengu-deck (0.1.2-1) unstable; urgency=medium
+
+  * Keep the session awake while playing, recording or streaming.
+  * Waveform render cache and idle meters, lower CPU use.
+  * Automix holds while a deck is paused, safer SoundCloud preloads.
+  * Escape closes dialogs, right click acts on the row under the pointer.
+  * Fix a crash when the recording folder cannot be created.
+
+ -- deimen24 <da.husmann24@gmail.com>  Tue, 29 Sep 2026 14:00:00 +0000
+
 pengu-deck (0.1.1-1) unstable; urgency=medium
 
   * Compact single line track list with artist, album and genre columns.

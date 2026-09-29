@@ -1,5 +1,5 @@
 Name:           pengu-deck
-Version:        0.1.1
+Version:        0.1.2
 Release:        1%{?dist}
 Summary:        Two deck DJ software with local files and SoundCloud streaming
 License:        GPL-3.0-or-later
@@ -49,6 +49,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.deimen24.Pe
 %{_datadir}/icons/hicolor/128x128/apps/io.github.deimen24.PenguDeck.png
 
 %changelog
+* Tue Sep 29 2026 deimen24 - 0.1.2-1
+- Keep the session awake while playing, recording or streaming
+- Waveform render cache and idle meters, lower CPU use
+- Automix holds while a deck is paused, safer SoundCloud preloads
+- Escape closes dialogs, right click acts on the row under the pointer
+- Fix a crash when the recording folder cannot be created
+
 * Tue Sep 29 2026 deimen24 - 0.1.1-1
 - Compact single line track list with artist, album and genre columns
 - Played tracks marked as whole rows, dark theme forced

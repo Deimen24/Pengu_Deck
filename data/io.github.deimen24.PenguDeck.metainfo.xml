@@ -30,6 +30,11 @@
     <binary>pengu-deck</binary>
   </provides>
   <releases>
+    <release version="0.1.2" date="2026-09-29">
+      <description>
+        <p>Keeps the session awake while playing, recording or streaming, lower CPU use through a waveform render cache, automix holds while a deck is paused, Escape closes dialogs, and a fix for a crash when the recording folder cannot be created.</p>
+      </description>
+    </release>
     <release version="0.1.1" date="2026-09-29">
       <description>
         <p>Compact single line track list with artist, album and genre columns, played tracks marked as whole rows, automix transitions sized from the tracks, and a fix for a crash when switching to History or a playlist.</p>
