@@ -717,7 +717,7 @@ static void build_soundcloud(struct prefs *p, GtkWidget *nb)
 	gtk_label_set_wrap(GTK_LABEL(l), TRUE);
 	gtk_label_set_xalign(GTK_LABEL(l), 0.0f);
 	gtk_widget_add_css_class(l, "dim-label");
-	gtk_grid_attach(GTK_GRID(g), l, 0, 3, 2, 1);
+	gtk_grid_attach(GTK_GRID(g), l, 0, 4, 2, 1);
 }
 
 /* ---- midi -------------------------------------------------------- */
