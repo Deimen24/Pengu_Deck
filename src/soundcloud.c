@@ -244,10 +244,19 @@ static gboolean token_request(const char *grant, gboolean user, GError **err)
 			sc_tokens_clear(&t);
 		} else if (reply) {
 			JsonNode *r = parse_json(reply, NULL);
-			const char *why = r && JSON_NODE_HOLDS_OBJECT(r) ?
-				str_member(json_node_get_object(r),
-					   "error_description") : NULL;
+			JsonObject *o = r && JSON_NODE_HOLDS_OBJECT(r) ?
+					json_node_get_object(r) : NULL;
+			const char *why = str_member(o, "error_description");
+			const char *code = str_member(o, "error");
 
+			if (!why && g_strcmp0(code, "invalid_client") == 0)
+				why = "the client ID or secret is wrong, "
+				      "check Preferences → SoundCloud";
+			else if (!why && g_strcmp0(code, "invalid_grant") == 0)
+				why = "the login has expired, please log in "
+				      "again";
+			else if (!why)
+				why = code;
 			if (why) {
 				g_clear_error(err);
 				g_set_error(err, SC_ERROR, SC_ERROR_AUTH,
