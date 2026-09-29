@@ -399,7 +399,7 @@ GtkWidget *pd_sc_view_new(struct app *app)
 				   "orientation", GTK_ORIENTATION_VERTICAL,
 				   "spacing", 4, NULL);
 	GtkWidget *bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-	GtkWidget *media, *filter;
+	GtkWidget *media, *filter, *b;
 
 	v->app = app;
 	media = pd_media_view_new(app, app->sc_results,
@@ -460,9 +460,14 @@ GtkWidget *pd_sc_view_new(struct app *app)
 	gtk_box_append(GTK_BOX(v), bar);
 
 	/* The media view's own entry filters the results locally. */
-	filter = pd_media_view_search_entry(v->media);
-	gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(filter),
+	filter = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	b = pd_media_view_search_entry(v->media);
+	gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(b),
 					      "Filter results");
+	gtk_widget_set_hexpand(b, TRUE);
+	gtk_box_append(GTK_BOX(filter), b);
+	gtk_box_append(GTK_BOX(filter),
+		       pd_media_view_played_button(v->media));
 	gtk_box_append(GTK_BOX(v), filter);
 	v->filter = filter;
 	v->stack = gtk_stack_new();

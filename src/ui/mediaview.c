@@ -31,6 +31,7 @@ struct _PdMediaView {
 	char *key_filter;		/* Camelot code, lower case */
 	char *sel_key;			/* key of the selected item */
 	struct playlist *playlist;	/* when showing a playlist */
+	gboolean played_only;		/* list only tracks played this session */
 };
 
 G_DEFINE_FINAL_TYPE(PdMediaView, pd_media_view, GTK_TYPE_BOX)
@@ -55,6 +56,8 @@ static gboolean match(gpointer item, gpointer data)
 	const char *hay;
 	int i;
 
+	if (v->played_only && !app_item_played(v->app, m))
+		return FALSE;
 	if (v->bpm_hi > 0.0) {
 		double b = item_bpm(m);
 
@@ -574,6 +577,26 @@ static void on_open_link(GSimpleAction *a, GVariant *p, gpointer data)
 	l = gtk_uri_launcher_new(m->permalink);
 	gtk_uri_launcher_launch(l, v->app->win, NULL, NULL, NULL);
 	g_object_unref(l);
+}
+
+static void on_played_only(GtkToggleButton *b, PdMediaView *v)
+{
+	v->played_only = gtk_toggle_button_get_active(b);
+	gtk_filter_changed(gtk_filter_list_model_get_filter(v->filtered),
+			   v->played_only ? GTK_FILTER_CHANGE_MORE_STRICT :
+			   GTK_FILTER_CHANGE_LESS_STRICT);
+}
+
+GtkWidget *pd_media_view_played_button(PdMediaView *v)
+{
+	GtkWidget *b = gtk_toggle_button_new_with_label("Played");
+
+	gtk_widget_add_css_class(b, "played-button");
+	gtk_widget_set_focusable(b, FALSE);
+	gtk_widget_set_tooltip_text(b, "Only list the tracks played in "
+				    "this session");
+	g_signal_connect(b, "toggled", G_CALLBACK(on_played_only), v);
+	return b;
 }
 
 GtkWidget *pd_media_view_queue_button(PdMediaView *v)

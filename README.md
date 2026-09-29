@@ -92,6 +92,9 @@ meson setup build && meson compile -C build && meson test -C build
 
 ## Layout
 
+**Played** next to the filter box lists only the tracks played in this
+session (the green rows); press it again for the whole list.
+
 Drag the divider above the Library tabs to give the library more room.
 The decks and the mixer shrink to fit: loop controls go first, then hot
 cues, overview and platter, then modes and pitch, then the waveform,

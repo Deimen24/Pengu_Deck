@@ -31,6 +31,8 @@ void pd_media_view_load_selected(PdMediaView *v, int idx);
 void pd_media_view_queue_selected(PdMediaView *v);
 /* A "+ Queue" button bound to this view. */
 GtkWidget *pd_media_view_queue_button(PdMediaView *v);
+/* Toggle: list only the tracks played in this session. */
+GtkWidget *pd_media_view_played_button(PdMediaView *v);
 guint pd_media_view_count(PdMediaView *v);
 
 G_END_DECLS

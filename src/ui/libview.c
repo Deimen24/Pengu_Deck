@@ -398,6 +398,7 @@ GtkWidget *pd_lib_view_new(struct app *app)
 	/* toolbar */
 	gtk_widget_set_hexpand(pd_media_view_search_entry(v->media), TRUE);
 	gtk_box_append(GTK_BOX(bar), pd_media_view_search_entry(v->media));
+	gtk_box_append(GTK_BOX(bar), pd_media_view_played_button(v->media));
 	gtk_box_append(GTK_BOX(bar), pd_media_view_queue_button(v->media));
 	v->add_folder = gtk_button_new_from_icon_name("folder-new-symbolic");
 	gtk_widget_set_tooltip_text(v->add_folder, "Add a music folder");
