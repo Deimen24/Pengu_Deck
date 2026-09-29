@@ -2,6 +2,8 @@
 /*
  * automix.c - hands free playback of the queue
  */
+#define G_LOG_DOMAIN "pengu-deck"
+
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -76,12 +78,26 @@ static bool loaded(int i)
 	       atomic_load(&t->state) != TRACK_FAILED;
 }
 
+/*
+ * The load came to nothing: the decoder gave up, the stream url could
+ * not be had (the deck then keeps whatever it held, or nothing), or a
+ * track was expected but the deck is empty.
+ */
 static bool failed(int i)
 {
 	struct track *t = deck_track(deck(i));
 
-	return !am.app->loading[i] && t &&
-	       atomic_load(&t->state) == TRACK_FAILED;
+	if (am.app->loading[i])
+		return false;
+	if (am.app->load_failed[i])
+		return true;
+	return t && atomic_load(&t->state) == TRACK_FAILED;
+}
+
+static bool next_failed(void)
+{
+	return failed(am.next) ||
+	       (!am.app->loading[am.next] && !deck_track(deck(am.next)));
 }
 
 static double item_bpm(PdMediaItem *m)
@@ -167,11 +183,15 @@ static PdMediaItem *pop_queue(int from)
 static void set_status(const char *fmt, ...) G_GNUC_PRINTF(1, 2);
 static void set_status(const char *fmt, ...)
 {
+	char old[sizeof(am.status)];
 	va_list ap;
 
+	g_strlcpy(old, am.status, sizeof(old));
 	va_start(ap, fmt);
 	g_vsnprintf(am.status, sizeof(am.status), fmt, ap);
 	va_end(ap);
+	if (strcmp(old, am.status) != 0)
+		g_debug("%s", am.status);
 }
 
 static double side_value(int i)
@@ -193,6 +213,8 @@ static bool load_next(int i)
 
 	if (!m)
 		return false;
+	g_debug("automix: loading \"%s\" into deck %c", m->title,
+		app_deck_letter(i));
 	am.app->automix_loading = TRUE;
 	app_load_item(am.app, i, m);
 	am.app->automix_loading = FALSE;
@@ -316,6 +338,7 @@ static void begin_fade(void)
 static void end_fade(void)
 {
 	deck_play(deck(am.active), false);
+	am.app->by_hand[am.active] = FALSE;
 	am.active = am.next;
 	am.next = -1;
 	am.state = AM_PLAYING;
@@ -344,11 +367,13 @@ static void tick_idle(void)
 		am.active = i;
 		am.started = true;
 		am.state = AM_PLAYING;
+		am.app->by_hand[i] = FALSE;
 		return;
 	}
 	for (k = 0; k < DECKS_USED; k++) {
 		if (!hand_ready(k))
 			continue;
+		am.app->by_hand[k] = FALSE;
 		am.active = k;
 		am.next = -1;
 		am.started = false;
@@ -377,6 +402,7 @@ static void tick_playing(void)
 			set_status("Automix: track failed, skipping");
 			am.state = AM_IDLE;
 			app_unload(am.app, am.active);
+			am.app->load_failed[am.active] = FALSE;
 			return;
 		}
 		if (!loaded(am.active))
@@ -406,6 +432,7 @@ static void tick_playing(void)
 		return;
 	if (!hand_ready(other) && !load_next(other))
 		return;
+	am.app->by_hand[other] = FALSE;
 	am.next = other;
 	am.state = AM_PRELOADED;
 	am.planned = false;
@@ -413,9 +440,10 @@ static void tick_playing(void)
 
 static void tick_preloaded(void)
 {
-	if (failed(am.next)) {
+	if (next_failed()) {
 		set_status("Automix: next track failed, skipping");
 		app_unload(am.app, am.next);
+		am.app->load_failed[am.next] = FALSE;
 		am.next = -1;
 		am.state = AM_PLAYING;
 		return;

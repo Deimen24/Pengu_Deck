@@ -6,6 +6,8 @@
  * appended to the track as it arrives, so playback of a SoundCloud stream
  * can start long before the download finishes.
  */
+#define G_LOG_DOMAIN "pengu-deck"
+
 #include <libavcodec/avcodec.h>
 #include <libavformat/avformat.h>
 #include <libavutil/channel_layout.h>
@@ -93,6 +95,14 @@ int decoder_open_input(AVFormatContext **fmt, const char *uri,
 	}
 	ret = avformat_open_input(fmt, uri, NULL, &opts);
 	av_dict_free(&opts);
+	if (ret < 0) {
+		char err[128];
+
+		av_strerror(ret, err, sizeof(err));
+		g_debug("decoder: open %s: %s", uri, err);
+	} else {
+		g_debug("decoder: opened %s", uri);
+	}
 	return ret;
 }
 
@@ -285,11 +295,13 @@ int decoder_run(struct track *t)
 			track_fail(t, "Cancelled");
 		else {
 			av_strerror(ret, err, sizeof(err));
+			g_debug("decoder: %s failed: %s", t->uri, err);
 			track_fail(t, err);
 		}
 		return -1;
 	}
 	if (track_frames(t) == 0) {
+		g_debug("decoder: %s: no audio", t->uri);
 		track_fail(t, "No audio found");
 		return -1;
 	}

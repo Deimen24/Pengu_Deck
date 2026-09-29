@@ -301,6 +301,10 @@ static gboolean sc_load_done(gpointer data)
 				  "available", l->item->title);
 	} else if (!g_error_matches(l->err, G_IO_ERROR,
 				    G_IO_ERROR_CANCELLED)) {
+		if (l->idx >= 0)
+			a->load_failed[l->idx] = TRUE;
+		g_debug("load of %s failed: %s", l->item->key,
+			l->err ? l->err->message : "no url");
 		app_toast(a, "%s", l->err ? l->err->message :
 			  "Could not load the SoundCloud track");
 	}
@@ -328,6 +332,8 @@ static void load_item(struct app *a, int idx, PdMediaItem *m)
 	gboolean *busy = idx == DECK_PREVIEW ? &a->preview_loading :
 			 &a->loading[idx];
 
+	if (idx >= 0)
+		a->load_failed[idx] = FALSE;
 	if (m->source == MEDIA_LOCAL) {
 		load_uri(a, idx, m->location, m->key, m->title, m->artist,
 			 m->bpm);
