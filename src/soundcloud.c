@@ -201,6 +201,8 @@ void sc_session_set_tokens(const struct sc_tokens *t)
 	sc_tokens_clear(&ses.t);
 	if (t)
 		tokens_copy(&ses.t, t);
+	/* a fresh login must reach the config, or the next start forgets it */
+	notify_changed();
 	g_mutex_unlock(&ses.lock);
 }
 
@@ -268,9 +270,12 @@ gboolean sc_parse_token_reply(const char *json, struct sc_tokens *out,
 /*
  * One token request against the OAuth endpoint.  @grant is the form
  * body without the client credentials, which are appended here.  Call
- * with the lock held; the result replaces the session tokens.
+ * with the lock held; the result replaces the session tokens.  @rejected
+ * (optional) tells a grant the server refused from a request that did
+ * not get through.
  */
-static gboolean token_request(const char *grant, gboolean user, GError **err)
+static gboolean token_request(const char *grant, gboolean user,
+			      gboolean *rejected, GError **err)
 {
 	char *id = g_uri_escape_string(ses.client_id, NULL, FALSE);
 	char *secret = g_uri_escape_string(ses.client_secret, NULL, FALSE);
@@ -295,6 +300,8 @@ static gboolean token_request(const char *grant, gboolean user, GError **err)
 		form = g_strdup_printf("%s&client_id=%s&client_secret=%s",
 				       grant, id, secret);
 	}
+	if (rejected)
+		*rejected = FALSE;
 	for (try = 0; ; try++) {
 		g_clear_error(err);
 		g_clear_pointer(&reply, g_free);
@@ -321,6 +328,9 @@ static gboolean token_request(const char *grant, gboolean user, GError **err)
 			const char *why = str_member(o, "error_description");
 			const char *code = str_member(o, "error");
 
+			if (rejected && status >= 400 && status < 500 &&
+			    status != 429)
+				*rejected = TRUE;
 			if (!why && g_strcmp0(code, "invalid_client") == 0)
 				why = "the client ID or secret is wrong, "
 				      "check Preferences → SoundCloud";
@@ -431,16 +441,27 @@ char *sc_session_token(GError **err)
 		char *r = g_uri_escape_string(ses.t.refresh, NULL, FALSE);
 		char *grant = g_strdup_printf("grant_type=refresh_token"
 					      "&refresh_token=%s", r);
-		gboolean user = ses.t.user;
+		gboolean user = ses.t.user, rejected = FALSE;
 		GError *e = NULL;
 
-		if (token_request(grant, user, &e)) {
+		if (token_request(grant, user, &rejected, &e)) {
 			g_free(grant);
 			g_free(r);
 			goto done;
 		}
 		g_free(grant);
 		g_free(r);
+		if (user && !rejected) {
+			/*
+			 * The server was not reached or is busy: the
+			 * refresh token is still good, try again later.
+			 */
+			g_set_error(err, SC_ERROR, SC_ERROR_AUTH,
+				    "SoundCloud could not renew the login: "
+				    "%s", e->message);
+			g_error_free(e);
+			goto out;
+		}
 		if (user) {
 			/* the login has lapsed for good */
 			sc_tokens_clear(&ses.t);
@@ -455,7 +476,7 @@ char *sc_session_token(GError **err)
 		sc_tokens_clear(&ses.t);
 	}
 	/* no user: the app's own credentials serve public content */
-	if (!token_request("grant_type=client_credentials", FALSE, err))
+	if (!token_request("grant_type=client_credentials", FALSE, NULL, err))
 		goto out;
 done:
 	token = g_strdup(ses.t.access);
