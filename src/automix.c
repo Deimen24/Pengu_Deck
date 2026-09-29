@@ -27,6 +27,9 @@
 #define LOCK_MAX	0.03	/* largest nudge the beat lock applies */
 #define LOCK_SECS	2.0	/* time the beat lock takes to close a gap */
 #define LOCK_DEAD	0.005	/* beats: closer than this counts as locked */
+#define LOW_CUT		-20.0	/* dB the lows are taken down to in a blend */
+#define BAR_BEATS	4.0
+#define BAR_TOL		0.08	/* bars: close enough to a downbeat to go */
 
 enum state {
 	AM_IDLE,		/* nothing playing, waiting for the queue */
@@ -55,6 +58,8 @@ static struct {
 	struct glide prep;	/* outgoing deck towards meet_from */
 	struct glide ret;	/* new active deck back to 0 % */
 	bool prepped;
+	gint64 due_at;		/* the blend is due, waiting for a downbeat */
+	float low_from, low_to;	/* low EQ before the blend, restored after */
 	enum state state;
 	int active;		/* deck currently carrying the mix */
 	int next;		/* deck holding the upcoming track */
@@ -155,6 +160,8 @@ static double match_score(int from, PdMediaItem *m)
 	} else {
 		score += 1.0;
 	}
+	if (t && t->key && m->key && g_str_equal(t->key, m->key))
+		score += UNMIXABLE / 2.0;	/* the same track again */
 	if (key >= 0 && mkey >= 0) {
 		/* Camelot wheel: same 0, neighbour or relative 1, and on */
 		const char *ca = key_camelot(key), *cb = key_camelot(mkey);
@@ -296,6 +303,70 @@ off:
 	atomic_store(&d->bend, 0.0f);
 }
 
+/* Position of deck @i inside its bar, 0..1, or -1 without a beat grid. */
+static double bar_phase(int i)
+{
+	struct track *t = deck_track(deck(i));
+	double b, beats;
+
+	if (!t)
+		return -1.0;
+	b = track_beat_len(t);
+	if (b <= 0.0)
+		return -1.0;
+	beats = (deck_position(deck(i)) - atomic_load(&t->beat_offset)) / b;
+	beats /= BAR_BEATS;
+	return beats - floor(beats);
+}
+
+/*
+ * Shift deck @d by whole beats so its downbeats fall on @m's: the beat
+ * phase is matched by deck_sync_phase(), this matches the bar.
+ */
+static void bar_align(int d, int m)
+{
+	struct track *t = deck_track(deck(d)), *mt = deck_track(deck(m));
+	double b, mb, beat, mbeat, delta;
+
+	if (!t || !mt)
+		return;
+	b = track_beat_len(t);
+	mb = track_beat_len(mt);
+	if (b <= 0.0 || mb <= 0.0)
+		return;
+	beat = floor((deck_position(deck(d)) - atomic_load(&t->beat_offset)) /
+		     b);
+	mbeat = floor((deck_position(deck(m)) -
+		       atomic_load(&mt->beat_offset)) / mb);
+	delta = fmod(mbeat - beat, BAR_BEATS);
+	if (delta < 0.0)
+		delta += BAR_BEATS;
+	if (delta > BAR_BEATS / 2.0)
+		delta -= BAR_BEATS;
+	if (delta != 0.0)
+		deck_seek(deck(d), deck_position(deck(d)) + delta * b);
+}
+
+/* Smooth step: the crossfader eases out of one track and into the other. */
+static double ease(double t)
+{
+	t = CLAMP(t, 0.0, 1.0);
+	return t * t * (3.0 - 2.0 * t);
+}
+
+/* Bass swap: the outgoing lows go first, the incoming lows come last. */
+static void bass_swap(double t)
+{
+	struct deck *from = deck(am.active), *to = deck(am.next);
+	double out = ease(t / 0.7);
+	double in = ease((t - 0.3) / 0.7);
+
+	atomic_store(&from->eq_db[EQ_LOW],
+		     (float)(am.low_from + (LOW_CUT - am.low_from) * out));
+	atomic_store(&to->eq_db[EQ_LOW],
+		     (float)(LOW_CUT + (am.low_to - LOW_CUT) * in));
+}
+
 /* Load the head of the queue into deck @i, false when the queue is empty. */
 static bool load_next(int i)
 {
@@ -309,6 +380,7 @@ static bool load_next(int i)
 	app_load_item(am.app, i, m);
 	am.app->automix_loading = FALSE;
 	g_object_unref(m);
+	pd_media_item_changed("*");
 	return true;
 }
 
@@ -444,9 +516,16 @@ static void begin_fade(void)
 	}
 	am.started = true;
 	am.app->by_hand[am.next] = FALSE;
+	am.low_from = atomic_load(&from->eq_db[EQ_LOW]);
+	am.low_to = atomic_load(&to->eq_db[EQ_LOW]);
+	/* the incoming track enters without its lows, they come in later */
+	atomic_store(&to->eq_db[EQ_LOW], (float)LOW_CUT);
 	start_deck(am.next, am.plan_start);
-	if (am.app->cfg.automix_sync)
+	if (am.app->cfg.automix_sync) {
 		deck_sync_phase(to, from);
+		bar_align(am.next, am.active);
+	}
+	pd_media_item_changed("*");
 
 	am.fade_start = g_get_monotonic_time();
 	am.fade_from = atomic_load(&am.app->engine.xfader);
@@ -459,6 +538,9 @@ static void end_fade(void)
 {
 	deck_play(deck(am.active), false);
 	atomic_store(&deck(am.next)->bend, 0.0f);
+	atomic_store(&deck(am.active)->eq_db[EQ_LOW], am.low_from);
+	atomic_store(&deck(am.next)->eq_db[EQ_LOW], am.low_to);
+	pd_media_item_changed("*");
 	am.app->by_hand[am.active] = FALSE;
 	am.active = am.next;
 	am.next = -1;
@@ -504,6 +586,7 @@ static void tick_idle(void)
 		am.next = -1;
 		am.started = false;
 		am.state = AM_PLAYING;
+		pd_media_item_changed("*");
 		set_status("Automix: starting deck %c", app_deck_letter(k));
 		return;
 	}
@@ -515,6 +598,7 @@ static void tick_idle(void)
 	am.next = -1;
 	am.started = false;
 	am.state = AM_PLAYING;
+	pd_media_item_changed("*");
 	set_status("Automix: starting on deck %c", app_deck_letter(i));
 }
 
@@ -609,7 +693,27 @@ static void tick_preloaded(void)
 	}
 	if (am.force || !atomic_load(&deck(am.active)->playing) ||
 	    remaining(am.active) <= am.plan_len) {
+		/*
+		 * Due.  Wait for the outgoing deck's next downbeat so the
+		 * incoming track comes in on a bar, one bar at most.
+		 */
+		double phase = bar_phase(am.active);
+		double bar = deck_bpm(deck(am.active)) > 0.0 ?
+			     BAR_BEATS * 60.0 / deck_bpm(deck(am.active)) : 0.0;
+		gint64 now = g_get_monotonic_time();
+
+		if (!am.due_at)
+			am.due_at = now;
+		if (atomic_load(&deck(am.active)->playing) && phase >= 0.0 &&
+		    phase > BAR_TOL && phase < 1.0 - BAR_TOL &&
+		    (now - am.due_at) / 1e6 < bar + 0.5 &&
+		    remaining(am.active) > FADE_MIN + bar) {
+			set_status("Automix: deck %c, waiting for the bar",
+				   app_deck_letter(am.active));
+			return;
+		}
 		am.force = false;
+		am.due_at = 0;
 		begin_fade();
 	}
 }
@@ -622,8 +726,9 @@ static void tick_fading(void)
 
 	if (t >= 1.0)
 		t = 1.0;
-	x = am.fade_from + (am.fade_to - am.fade_from) * t;
+	x = am.fade_from + (am.fade_to - am.fade_from) * ease(t);
 	atomic_store(&am.app->engine.xfader, (float)x);
+	bass_swap(t);
 	if (am.app->cfg.automix_sync && am.match)
 		beat_lock(am.active, am.next);
 	set_status("Automix: mixing %c → %c over %d s",
@@ -680,6 +785,17 @@ void automix_set_enabled(bool on)
 		if (am.timer)
 			g_source_remove(am.timer);
 		am.timer = 0;
+		if (am.state == AM_FADING) {
+			/* stopped mid blend: undo what the blend was doing */
+			atomic_store(&deck(am.active)->eq_db[EQ_LOW],
+				     am.low_from);
+			atomic_store(&deck(am.next)->eq_db[EQ_LOW], am.low_to);
+			atomic_store(&deck(am.next)->bend, 0.0f);
+		}
+		am.prep.on = false;
+		am.ret.on = false;
+		am.state = AM_IDLE;
+		am.due_at = 0;
 		set_status("Automix is off");
 	}
 }
@@ -721,4 +837,41 @@ void automix_next(void)
 const char *automix_status(void)
 {
 	return am.status;
+}
+
+int automix_active_deck(void)
+{
+	return am.on && am.state != AM_IDLE ? am.active : -1;
+}
+
+int automix_next_deck(void)
+{
+	return am.on && (am.state == AM_PRELOADED || am.state == AM_FADING) ?
+	       am.next : -1;
+}
+
+double automix_pitch_for(PdMediaItem *m)
+{
+	int from = am.on && am.state != AM_IDLE ? am.active : -1;
+	double bpm, b, r;
+	int i;
+
+	if (from < 0) {
+		/* nothing running: relate to whatever plays */
+		for (i = 0; i < DECKS_USED; i++)
+			if (atomic_load(&deck(i)->playing))
+				from = i;
+	}
+	if (from < 0)
+		return NAN;
+	bpm = deck_bpm(deck(from));
+	b = item_bpm(m);
+	if (bpm <= 0.0 || b <= 0.0)
+		return NAN;
+	r = bpm / b;
+	if (r > 1.5)
+		r /= 2.0;
+	else if (r < 0.75)
+		r *= 2.0;
+	return r - 1.0;
 }

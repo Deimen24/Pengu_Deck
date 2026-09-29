@@ -42,6 +42,44 @@ PdMediaItem *pd_media_item_new(enum media_source source, const char *key)
 	return m;
 }
 
+/* ---- change broadcast -------------------------------------------- */
+
+#define PD_TYPE_MEDIA_WATCH (pd_media_watch_get_type())
+G_DECLARE_FINAL_TYPE(PdMediaWatch, pd_media_watch, PD, MEDIA_WATCH, GObject)
+
+struct _PdMediaWatch {
+	GObject parent;
+};
+
+G_DEFINE_FINAL_TYPE(PdMediaWatch, pd_media_watch, G_TYPE_OBJECT)
+
+static guint changed_signal;
+
+static void pd_media_watch_class_init(PdMediaWatchClass *klass)
+{
+	changed_signal = g_signal_new("changed", G_TYPE_FROM_CLASS(klass),
+				      G_SIGNAL_RUN_LAST, 0, NULL, NULL, NULL,
+				      G_TYPE_NONE, 1, G_TYPE_STRING);
+}
+
+static void pd_media_watch_init(PdMediaWatch *w)
+{
+}
+
+GObject *pd_media_watch(void)
+{
+	static GObject *watch;
+
+	if (!watch)
+		watch = g_object_new(PD_TYPE_MEDIA_WATCH, NULL);
+	return watch;
+}
+
+void pd_media_item_changed(const char *key)
+{
+	g_signal_emit(pd_media_watch(), changed_signal, 0, key ? key : "*");
+}
+
 const char *pd_media_item_haystack(PdMediaItem *m)
 {
 	char *s = g_object_get_qdata(G_OBJECT(m), haystack_quark);

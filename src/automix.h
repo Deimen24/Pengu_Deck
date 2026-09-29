@@ -32,4 +32,14 @@ void automix_next(void);
 /* Human readable state for the panel, static string. */
 const char *automix_status(void);
 
+/* Decks automix plays on right now, -1 when none. */
+int automix_active_deck(void);
+int automix_next_deck(void);
+
+/*
+ * Pitch @m would need to follow the deck automix plays on (or the deck
+ * playing, when automix is idle); NAN when either tempo is unknown.
+ */
+double automix_pitch_for(PdMediaItem *m);
+
 #endif /* PD_AUTOMIX_H */

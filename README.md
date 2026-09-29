@@ -105,8 +105,12 @@ returns. The split is remembered.
 ## Automix
 
 Queue tracks from the Library or SoundCloud tab (**+ Queue**, context
-menu or drag and drop; Ctrl or Shift click selects several) and press
-**AUTOMIX**. The queue alternates between decks A and B: as soon as a
+menu, or drag rows onto the **Automix** tab or into the queue; audio
+files from the file manager drop there too; Ctrl or Shift click selects
+several) and press **AUTOMIX**. The Automix tab shows which decks play
+now and next, and every queued row carries key, tempo and the pitch it
+would need to follow the playing deck (green within the pitch range,
+red out of reach). Drag rows to reorder, Delete removes. The queue alternates between decks A and B: as soon as a
 deck is free the next track is loaded into it, so it is decoded and
 analysed long before it is due. It starts at its cue point, tempo
 matched when the pitch range allows it, and the crossfader glides over.
@@ -137,6 +141,11 @@ starts at the rest of the difference, and the beats are kept locked
 while the crossfader moves. Afterwards the new deck glides back to its
 own tempo over 30 s. Touching a pitch fader while it glides takes it
 over.
+
+Every blend starts on a downbeat of the outgoing track, eases the
+crossfader in and out, and swaps the bass: the outgoing lows go down
+over the first part, the incoming lows come up over the last part, and
+both EQs return to where they were.
 
 ## MIDI controllers
 

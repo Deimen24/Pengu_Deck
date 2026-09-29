@@ -240,6 +240,8 @@ static void on_cell_right_click(GtkGestureClick *g, int n, double x,
 				GTK_SELECTION_MODEL(v->selection), pos, TRUE);
 }
 
+static void on_item_changed(GObject *watch, const char *key, GtkListItem *li);
+
 static void setup_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 {
 	PdMediaView *v = g_object_get_data(G_OBJECT(f), "view");
@@ -256,6 +258,10 @@ static void setup_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 
 	gtk_widget_set_hexpand(w, col == COL_TRACK || col == COL_ARTIST ||
 			       col == COL_ALBUM);
+	g_object_set_data(G_OBJECT(li), "view", v);
+	g_object_set_data(G_OBJECT(li), "col", GINT_TO_POINTER(col));
+	g_signal_connect_object(pd_media_watch(), "changed",
+				G_CALLBACK(on_item_changed), li, 0);
 	/* Every cell is a drag handle for its row. */
 	gtk_drag_source_set_actions(src, GDK_ACTION_COPY);
 	g_signal_connect(src, "prepare", G_CALLBACK(drag_prepare), li);
@@ -322,14 +328,16 @@ static void mark_played(GtkWidget *cell, gboolean played)
 	}
 }
 
-static void bind_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
+static void bind_item(PdMediaView *v, GtkListItem *li, enum column col)
 {
 	PdMediaItem *m = gtk_list_item_get_item(li);
 	GtkWidget *w = gtk_list_item_get_child(li);
-	PdMediaView *v = g_object_get_data(G_OBJECT(f), "view");
-	enum column col = GPOINTER_TO_INT(data);
-	gboolean played = app_item_played(v->app, m);
+	gboolean played;
 	char *tmp = NULL;
+
+	if (!m)
+		return;
+	played = app_item_played(v->app, m);
 
 	/* every history entry was played, marking them all says nothing */
 	if (v->store == history_items())
@@ -392,6 +400,25 @@ static void bind_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 		break;
 	}
 	g_free(tmp);
+}
+
+static void bind_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
+{
+	bind_item(g_object_get_data(G_OBJECT(f), "view"), li,
+		  GPOINTER_TO_INT(data));
+}
+
+/* An item's state changed somewhere: refresh the cell showing it. */
+static void on_item_changed(GObject *watch, const char *key, GtkListItem *li)
+{
+	PdMediaItem *m = gtk_list_item_get_item(li);
+	PdMediaView *v = g_object_get_data(G_OBJECT(li), "view");
+
+	if (!m || !v)
+		return;
+	if (g_str_equal(key, "*") || g_strcmp0(m->key, key) == 0)
+		bind_item(v, li, GPOINTER_TO_INT(
+				g_object_get_data(G_OBJECT(li), "col")));
 }
 
 static void add_column(PdMediaView *v, const char *title, enum column col,
@@ -577,6 +604,13 @@ static void on_open_link(GSimpleAction *a, GVariant *p, gpointer data)
 	l = gtk_uri_launcher_new(m->permalink);
 	gtk_uri_launcher_launch(l, v->app->win, NULL, NULL, NULL);
 	g_object_unref(l);
+}
+
+static void on_state_changed(GObject *watch, const char *key, PdMediaView *v)
+{
+	if (v->played_only)
+		gtk_filter_changed(gtk_filter_list_model_get_filter(v->filtered),
+				   GTK_FILTER_CHANGE_DIFFERENT);
 }
 
 static void on_played_only(GtkToggleButton *b, PdMediaView *v)
@@ -811,6 +845,8 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 
 	v->app = app;
 	v->store = store;
+	g_signal_connect_object(pd_media_watch(), "changed",
+				G_CALLBACK(on_state_changed), v, 0);
 	v->filtered = gtk_filter_list_model_new(
 			G_LIST_MODEL(g_object_ref(store)), GTK_FILTER(filter));
 	gtk_filter_list_model_set_incremental(v->filtered, TRUE);
@@ -826,6 +862,7 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 						  FALSE);
 	gtk_column_view_set_show_row_separators(GTK_COLUMN_VIEW(v->view),
 						FALSE);
+	gtk_column_view_set_reorderable(GTK_COLUMN_VIEW(v->view), FALSE);
 	gtk_widget_add_css_class(v->view, "data-table");
 
 #define STR_SORTER(field) \

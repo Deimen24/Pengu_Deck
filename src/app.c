@@ -98,24 +98,9 @@ static void queue_changed(GListModel *m, guint pos, guint removed,
 		g_idle_add(fetch_queued, g_list_model_get_item(m, i));
 }
 
-static void notify_store(GListStore *s, PdMediaItem *m)
-{
-	guint n = g_list_model_get_n_items(G_LIST_MODEL(s)), i;
-
-	for (i = 0; i < n; i++) {
-		PdMediaItem *x = g_list_model_get_item(G_LIST_MODEL(s), i);
-
-		g_object_unref(x);
-		if (x == m || (m->key && g_str_equal(x->key, m->key)))
-			g_list_model_items_changed(G_LIST_MODEL(s), i, 1, 1);
-	}
-}
-
 void app_item_changed(struct app *a, PdMediaItem *m)
 {
-	notify_store(a->library, m);
-	notify_store(a->sc_results, m);
-	notify_store(a->queue, m);
+	pd_media_item_changed(m->key);
 }
 
 bool app_item_played(struct app *a, PdMediaItem *m)

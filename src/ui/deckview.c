@@ -615,6 +615,7 @@ static void on_loop_double(GtkButton *b, PdDeckView *v)
 static gboolean on_drop(GtkDropTarget *t, const GValue *val, double x,
 			double y, PdDeckView *v)
 {
+	gtk_widget_remove_css_class(GTK_WIDGET(v), "drop-target");
 	if (G_VALUE_HOLDS(val, PD_TYPE_MEDIA_ITEM)) {
 		app_load_item(v->app, v->idx, g_value_get_object(val));
 		return TRUE;
@@ -632,6 +633,18 @@ static gboolean on_drop(GtkDropTarget *t, const GValue *val, double x,
 		return path != NULL;
 	}
 	return FALSE;
+}
+
+static GdkDragAction on_drop_enter(GtkDropTarget *t, double x, double y,
+				   PdDeckView *v)
+{
+	gtk_widget_add_css_class(GTK_WIDGET(v), "drop-target");
+	return GDK_ACTION_COPY;
+}
+
+static void on_drop_leave(GtkDropTarget *t, PdDeckView *v)
+{
+	gtk_widget_remove_css_class(GTK_WIDGET(v), "drop-target");
 }
 
 /* ---- construction ------------------------------------------------ */
@@ -1033,6 +1046,8 @@ GtkWidget *pd_deck_view_new(struct app *app, int idx)
 	drop = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_COPY);
 	gtk_drop_target_set_gtypes(drop, types, G_N_ELEMENTS(types));
 	g_signal_connect(drop, "drop", G_CALLBACK(on_drop), v);
+	g_signal_connect(drop, "enter", G_CALLBACK(on_drop_enter), v);
+	g_signal_connect(drop, "leave", G_CALLBACK(on_drop_leave), v);
 	gtk_widget_add_controller(GTK_WIDGET(v), GTK_EVENT_CONTROLLER(drop));
 
 	pd_deck_view_apply_config(v);

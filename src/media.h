@@ -46,6 +46,16 @@ PdMediaItem *pd_media_item_new(enum media_source source, const char *key);
 /* Lower case "title artist album genre" for searching. */
 const char *pd_media_item_haystack(PdMediaItem *item);
 
+/*
+ * State that is not part of the item (played mark, cache progress,
+ * pre-listen) is broadcast by key on this object's "changed" signal
+ * (const char *key; "*" means every item), so bound rows refresh in
+ * place instead of the list re-emitting them, which would cancel a
+ * click or drag in flight.
+ */
+GObject *pd_media_watch(void);
+void pd_media_item_changed(const char *key);
+
 char *format_duration(double seconds);
 
 G_END_DECLS

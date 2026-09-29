@@ -395,6 +395,52 @@ button.queue-button {
 	font-weight: 600;
 }
 
+.automix-now {
+	color: @fg;
+	font-weight: 600;
+}
+
+.queue-pitch {
+	color: @dim;
+	font-size: 11px;
+}
+
+.queue-pitch.near {
+	color: @play;
+}
+
+.queue-pitch.far {
+	color: @rec;
+}
+
+/* a deck ready to take the track hovering over it */
+deck.drop-target {
+	border-color: @deck-a;
+	box-shadow: inset 0 0 0 2px alpha(@deck-a, 0.6);
+}
+
+deck.deck-b.drop-target {
+	border-color: @deck-b;
+	box-shadow: inset 0 0 0 2px alpha(@deck-b, 0.6);
+}
+
+/* a queue row a drop would land on */
+box.queue-row.drop-here {
+	box-shadow: inset 0 2px 0 @key;
+}
+
+/* rows of the lower part: a clear hover, a clear press */
+columnview.data-table > listview > row:active,
+listview.queue-list > row:active {
+	background: #222a3a;
+}
+
+.toolbar > button,
+.toolbar > togglebutton,
+.toolbar > spinbutton {
+	min-height: 30px;
+}
+
 /* ---- scales ------------------------------------------------------ */
 
 scale.pitch-fader,
@@ -475,10 +521,17 @@ notebook > header {
 }
 
 notebook > header tab {
-	padding: 4px 18px;
+	padding: 6px 20px;
 	color: @dim;
 	font-weight: 700;
 	letter-spacing: 1px;
+	border-bottom: 2px solid transparent;
+	transition: color 80ms, border-color 80ms;
+}
+
+notebook > header tab:hover {
+	color: @fg;
+	background: alpha(@fg, 0.04);
 }
 
 notebook > header tab:checked {

@@ -5,6 +5,7 @@
 #define G_LOG_DOMAIN "pengu-deck"
 
 #include "deckview.h"
+#include "library.h"
 #include "libview.h"
 #include "mixerview.h"
 #include "pd-build.h"
@@ -674,6 +675,69 @@ static void on_split(GObject *paned, GParamSpec *ps, PdWindow *w)
 	w->split_save = g_timeout_add_seconds(2, save_split, w);
 }
 
+/* ---- tabs as drop targets ---------------------------------------- */
+
+struct tab_drop {
+	PdWindow *w;
+	int page;
+};
+
+/* Hovering a tab with a track switches to it, so the drop can go on. */
+static GdkDragAction tab_enter(GtkDropTarget *t, double x, double y,
+			       struct tab_drop *d)
+{
+	gtk_notebook_set_current_page(GTK_NOTEBOOK(d->w->notebook), d->page);
+	return d->page == 2 ? GDK_ACTION_COPY : 0;
+}
+
+static gboolean tab_drop(GtkDropTarget *t, const GValue *val, double x,
+			 double y, struct tab_drop *d)
+{
+	struct app *a = d->w->app;
+
+	if (d->page != 2)
+		return FALSE;
+	if (G_VALUE_HOLDS(val, PD_TYPE_MEDIA_ITEM)) {
+		g_list_store_append(a->queue, g_value_get_object(val));
+		return TRUE;
+	}
+	if (G_VALUE_HOLDS(val, GDK_TYPE_FILE_LIST)) {
+		GSList *l;
+
+		for (l = g_value_get_boxed(val); l; l = l->next) {
+			char *path = g_file_get_path(l->data);
+			PdMediaItem *m = path ? library_probe_file(path) :
+					NULL;
+
+			if (m) {
+				g_list_store_append(a->queue, m);
+				g_object_unref(m);
+			}
+			g_free(path);
+		}
+		return TRUE;
+	}
+	return FALSE;
+}
+
+static GtkWidget *tab_label(PdWindow *w, const char *text, int page)
+{
+	GtkWidget *l = gtk_label_new(text);
+	GtkDropTarget *drop = gtk_drop_target_new(G_TYPE_INVALID,
+						  GDK_ACTION_COPY);
+	GType types[] = { PD_TYPE_MEDIA_ITEM, GDK_TYPE_FILE_LIST };
+	struct tab_drop *d = g_new0(struct tab_drop, 1);
+
+	d->w = w;
+	d->page = page;
+	gtk_drop_target_set_gtypes(drop, types, G_N_ELEMENTS(types));
+	g_signal_connect(drop, "enter", G_CALLBACK(tab_enter), d);
+	g_signal_connect(drop, "drop", G_CALLBACK(tab_drop), d);
+	g_object_set_data_full(G_OBJECT(l), "tab-drop", d, g_free);
+	gtk_widget_add_controller(l, GTK_EVENT_CONTROLLER(drop));
+	return l;
+}
+
 static void pd_window_dispose(GObject *obj)
 {
 	PdWindow *w = PD_WINDOW(obj);
@@ -773,14 +837,14 @@ GtkWidget *pd_window_new(struct app *app)
 	w->queue = pd_queue_view_new(app);
 	w->notebook = gtk_notebook_new();
 	gtk_notebook_append_page(GTK_NOTEBOOK(w->notebook), w->lib,
-				 gtk_label_new("Library"));
+				 tab_label(w, "Library", 0));
 	gtk_notebook_append_page(GTK_NOTEBOOK(w->notebook), w->sc,
-				 gtk_label_new("SoundCloud"));
+				 tab_label(w, "SoundCloud", 1));
 	gtk_notebook_append_page(GTK_NOTEBOOK(w->notebook), w->queue,
-				 gtk_label_new("Automix"));
+				 tab_label(w, "Automix", 2));
 	w->sampler = pd_sampler_view_new(app);
 	gtk_notebook_append_page(GTK_NOTEBOOK(w->notebook), w->sampler,
-				 gtk_label_new("Sampler"));
+				 tab_label(w, "Sampler", 3));
 	gtk_widget_set_margin_start(w->notebook, 8);
 	gtk_widget_set_margin_end(w->notebook, 8);
 	gtk_widget_set_margin_bottom(w->notebook, 8);
