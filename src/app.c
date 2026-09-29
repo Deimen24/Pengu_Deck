@@ -257,13 +257,23 @@ static gboolean sc_load_done(gpointer data)
 		a->preview_loading = FALSE;
 	else
 		a->loading[l->idx] = FALSE;
+	/* the preview was stopped or moved on while the url resolved */
+	if (l->idx == DECK_PREVIEW &&
+	    g_strcmp0(a->preview_key, l->item->key) != 0) {
+		g_free(l->url);
+		l->url = NULL;
+		g_clear_error(&l->err);
+		l->err = g_error_new_literal(G_IO_ERROR, G_IO_ERROR_CANCELLED,
+					     "");
+	}
 	if (l->url) {
 		load_uri(a, l->idx, l->url, l->item->key, l->item->title,
 			 l->item->artist, l->item->bpm);
 		if (l->item->preview)
 			app_toast(a, "Only a 30 second preview of \"%s\" is "
 				  "available", l->item->title);
-	} else {
+	} else if (!g_error_matches(l->err, G_IO_ERROR,
+				    G_IO_ERROR_CANCELLED)) {
 		app_toast(a, "%s", l->err ? l->err->message :
 			  "Could not load the SoundCloud track");
 	}
@@ -332,6 +342,8 @@ void app_preview(struct app *a, PdMediaItem *m)
 		app_preview_stop(a);
 		return;
 	}
+	if (a->preview_loading)
+		return;		/* one stream url at a time */
 	if (a->preview_key)
 		app_item_changed(a, &probe);
 	g_free(a->preview_key);
@@ -347,8 +359,9 @@ void app_preview_stop(struct app *a)
 	deck_play(&a->engine.preview, false);
 	if (!a->preview_key)
 		return;
-	g_clear_pointer(&a->preview_key, g_free);
+	/* notify while the key is still alive, the probe aliases it */
 	app_item_changed(a, &probe);
+	g_clear_pointer(&a->preview_key, g_free);
 }
 
 bool app_previewing(struct app *a, PdMediaItem *m)

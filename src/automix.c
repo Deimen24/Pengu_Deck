@@ -38,6 +38,9 @@ static struct {
 	double plan_len;	/* transition length for the next fade */
 	double plan_start;	/* where the next track starts, frames */
 	bool planned;
+	bool plan_final;	/* both tracks were fully known when planned */
+	gint64 plan_time;
+	bool started;		/* the active deck was started by automix */
 	char status[160];
 } am;
 
@@ -57,11 +60,15 @@ static double remaining(int i)
 	return (len - deck_position(deck(i))) / t->rate;
 }
 
+/*
+ * While a SoundCloud stream url is being resolved the deck still holds
+ * its previous track, so a pending load counts as "nothing there yet".
+ */
 static bool loaded(int i)
 {
 	struct track *t = deck_track(deck(i));
 
-	return t && track_frames(t) > 0 &&
+	return !am.app->loading[i] && t && track_frames(t) > 0 &&
 	       atomic_load(&t->state) != TRACK_FAILED;
 }
 
@@ -69,7 +76,8 @@ static bool failed(int i)
 {
 	struct track *t = deck_track(deck(i));
 
-	return t && atomic_load(&t->state) == TRACK_FAILED;
+	return !am.app->loading[i] && t &&
+	       atomic_load(&t->state) == TRACK_FAILED;
 }
 
 static PdMediaItem *pop_queue(void)
@@ -122,6 +130,8 @@ static void start_deck(int i, double at)
 
 	deck_seek(d, at >= 0.0 ? at : d->cue);
 	deck_play(d, true);
+	if (i == am.active)
+		am.started = true;
 }
 
 /* Pitch the incoming deck would need to match the outgoing one. */
@@ -151,8 +161,12 @@ static void plan_transition(int from, int to)
 	am.plan_len = len;
 	am.plan_start = -1.0;
 	am.planned = true;
+	am.plan_time = g_get_monotonic_time();
+	am.plan_final = true;
 	if (!c->automix_auto || !tf || !tt)
 		return;
+	am.plan_final = track_done(tf) && track_done(tt) &&
+			atomic_load(&tt->analysed);
 
 	match = c->automix_sync && tempo_matchable(from, to);
 	bpm = deck_bpm(deck(from));
@@ -188,6 +202,7 @@ static void begin_fade(void)
 	}
 	if (!am.planned)
 		plan_transition(am.active, am.next);
+	am.started = true;
 	start_deck(am.next, am.plan_start);
 	if (am.app->cfg.automix_sync)
 		deck_sync_phase(to, from);
@@ -227,6 +242,7 @@ static void tick_idle(void)
 
 	if (atomic_load(&deck(i)->playing)) {
 		am.active = i;
+		am.started = true;
 		am.state = AM_PLAYING;
 		return;
 	}
@@ -236,6 +252,7 @@ static void tick_idle(void)
 	}
 	am.active = i;
 	am.next = -1;
+	am.started = false;
 	am.state = AM_PLAYING;
 	set_status("Automix: starting on deck %c", app_deck_letter(i));
 }
@@ -245,7 +262,6 @@ static void tick_playing(void)
 	struct deck *d = deck(am.active);
 	int other = am.active ^ 1;
 
-	/* A freshly loaded first track: start it once audio is there. */
 	if (!atomic_load(&d->playing)) {
 		if (failed(am.active)) {
 			set_status("Automix: track failed, skipping");
@@ -253,11 +269,18 @@ static void tick_playing(void)
 			app_unload(am.app, am.active);
 			return;
 		}
-		if (loaded(am.active) && remaining(am.active) > 1.0)
+		if (!loaded(am.active))
+			return;
+		if (!am.started && remaining(am.active) > 1.0) {
+			/* A freshly loaded first track: start it. */
 			start_deck(am.active, -1.0);
-		else if (loaded(am.active)) {
+		} else if (remaining(am.active) <= 1.0) {
 			/* Ended without a next track: go straight on. */
 			am.state = AM_IDLE;
+		} else {
+			/* Paused by hand: wait, do not restart it. */
+			set_status("Automix: deck %c paused",
+				   app_deck_letter(am.active));
 		}
 		return;
 	}
@@ -294,14 +317,24 @@ static void tick_preloaded(void)
 			   app_deck_letter(am.next));
 		return;
 	}
-	/* Plan once both tracks are fully known, re-plan when it changes. */
-	if (!am.planned || (am.app->cfg.automix_auto &&
-			    track_done(deck_track(deck(am.next))) &&
-			    am.plan_len == am.app->cfg.automix_fade))
+	/*
+	 * Plan as soon as audio is there, then re-plan once a second while
+	 * decoding and analysis still change what is known about the tracks.
+	 */
+	if (!am.planned || (!am.plan_final &&
+			    g_get_monotonic_time() - am.plan_time > G_USEC_PER_SEC))
 		plan_transition(am.active, am.next);
 	set_status("Automix: deck %c, %d s left, %c next, %d s blend",
 		   app_deck_letter(am.active), (int)remaining(am.active),
 		   app_deck_letter(am.next), (int)am.plan_len);
+	if (!atomic_load(&deck(am.active)->playing) && !am.force &&
+	    remaining(am.active) > 1.0) {
+		/* Paused by hand: hold the transition until play resumes. */
+		set_status("Automix: deck %c paused, %c ready",
+			   app_deck_letter(am.active),
+			   app_deck_letter(am.next));
+		return;
+	}
 	if (am.force || !atomic_load(&deck(am.active)->playing) ||
 	    remaining(am.active) <= am.plan_len) {
 		am.force = false;
@@ -399,10 +432,12 @@ void automix_next(void)
 	if (am.state != AM_PLAYING)
 		return;
 	other = am.active ^ 1;
-	if (atomic_load(&deck(other)->playing) || !load_next(other))
+	if (atomic_load(&deck(other)->playing) || am.app->loading[other] ||
+	    !load_next(other))
 		return;
 	am.next = other;
 	am.state = AM_PRELOADED;
+	am.planned = false;
 	am.force = true;
 }
 

@@ -19,6 +19,15 @@ struct _PdQueueView {
 
 G_DEFINE_FINAL_TYPE(PdQueueView, pd_queue_view, GTK_TYPE_BOX)
 
+static void on_position(GtkListItem *li, GParamSpec *ps, GtkWidget *num)
+{
+	guint pos = gtk_list_item_get_position(li);
+	char *s = g_strdup_printf("%u", pos + 1);
+
+	gtk_label_set_text(GTK_LABEL(num), s);
+	g_free(s);
+}
+
 static void setup_row(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 {
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
@@ -38,6 +47,8 @@ static void setup_row(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 	gtk_box_append(GTK_BOX(box), title);
 	gtk_box_append(GTK_BOX(box), len);
 	gtk_list_item_set_child(li, box);
+	/* rows keep their item when earlier ones go, only the position moves */
+	g_signal_connect(li, "notify::position", G_CALLBACK(on_position), num);
 }
 
 static void bind_row(GtkListItemFactory *f, GtkListItem *li, gpointer data)

@@ -29,6 +29,7 @@ struct _PdMediaView {
 	char **terms;
 	double bpm_lo, bpm_hi;		/* from a bpm: token, 0 when unused */
 	char *key_filter;		/* Camelot code, lower case */
+	char *sel_key;			/* key of the selected item */
 	struct playlist *playlist;	/* when showing a playlist */
 };
 
@@ -222,12 +223,30 @@ static void drag_begin(GtkDragSource *src, GdkDrag *drag, GtkListItem *li)
 			       g_object_unref);
 }
 
+/* Right click acts on the row under the pointer, so select it first. */
+static void on_cell_right_click(GtkGestureClick *g, int n, double x,
+				double y, GtkListItem *li)
+{
+	PdMediaView *v = g_object_get_data(G_OBJECT(g), "view");
+	guint pos = gtk_list_item_get_position(li);
+
+	if (pos != GTK_INVALID_LIST_POSITION)
+		gtk_single_selection_set_selected(v->selection, pos);
+}
+
 static void setup_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 {
 	PdMediaView *v = g_object_get_data(G_OBJECT(f), "view");
 	enum column col = GPOINTER_TO_INT(data);
 	GtkWidget *w = make_cell(v, col, li);
 	GtkDragSource *src = gtk_drag_source_new();
+	GtkGesture *rc = gtk_gesture_click_new();
+
+	gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(rc),
+				      GDK_BUTTON_SECONDARY);
+	g_object_set_data(G_OBJECT(rc), "view", v);
+	g_signal_connect(rc, "pressed", G_CALLBACK(on_cell_right_click), li);
+	gtk_widget_add_controller(w, GTK_EVENT_CONTROLLER(rc));
 
 	gtk_widget_set_hexpand(w, col == COL_TRACK || col == COL_ARTIST ||
 			       col == COL_ALBUM);
@@ -624,6 +643,41 @@ static void on_search(GtkEditable *e, PdMediaView *v)
 	pd_media_view_set_filter(v, gtk_editable_get_text(e));
 }
 
+static void on_selected(GObject *sel, GParamSpec *ps, PdMediaView *v)
+{
+	PdMediaItem *m = gtk_single_selection_get_selected_item(
+					GTK_SINGLE_SELECTION(sel));
+
+	if (!m)
+		return;
+	g_free(v->sel_key);
+	v->sel_key = g_strdup(m->key);
+}
+
+/*
+ * Refreshing a row (played mark, cache state) re-emits its item, which
+ * makes the single selection drop it; put it back when it is still in
+ * the changed range.
+ */
+static void reselect(PdMediaView *v, GListModel *m, guint pos, guint add)
+{
+	guint i;
+
+	if (!v->sel_key || gtk_single_selection_get_selected(v->selection) !=
+	    GTK_INVALID_LIST_POSITION)
+		return;
+	for (i = pos; i < pos + add; i++) {
+		PdMediaItem *x = g_list_model_get_item(m, i);
+		gboolean hit = x && g_strcmp0(x->key, v->sel_key) == 0;
+
+		g_clear_object(&x);
+		if (hit) {
+			gtk_single_selection_set_selected(v->selection, i);
+			return;
+		}
+	}
+}
+
 static void on_items_changed(GListModel *m, guint pos, guint rm, guint add,
 			     PdMediaView *v)
 {
@@ -631,6 +685,7 @@ static void on_items_changed(GListModel *m, guint pos, guint rm, guint add,
 	guint total = g_list_model_get_n_items(G_LIST_MODEL(v->store));
 	char *s;
 
+	reselect(v, m, pos, add);
 	if (n == total)
 		s = g_strdup_printf("%u track%s", n, n == 1 ? "" : "s");
 	else
@@ -641,17 +696,33 @@ static void on_items_changed(GListModel *m, guint pos, guint rm, guint add,
 					 total ? "list" : "empty");
 }
 
+static void pd_media_view_dispose(GObject *obj)
+{
+	PdMediaView *v = PD_MEDIA_VIEW(obj);
+	GtkWidget *pop = g_object_steal_data(obj, "popover");
+
+	/* the popover is a foreign child of the column view */
+	if (pop)
+		gtk_widget_unparent(pop);
+	if (v->selection)
+		g_signal_handlers_disconnect_by_data(v->selection, v);
+	g_clear_object(&v->selection);
+	G_OBJECT_CLASS(pd_media_view_parent_class)->dispose(obj);
+}
+
 static void pd_media_view_finalize(GObject *obj)
 {
 	PdMediaView *v = PD_MEDIA_VIEW(obj);
 
 	g_strfreev(v->terms);
 	g_free(v->key_filter);
+	g_free(v->sel_key);
 	G_OBJECT_CLASS(pd_media_view_parent_class)->finalize(obj);
 }
 
 static void pd_media_view_class_init(PdMediaViewClass *klass)
 {
+	G_OBJECT_CLASS(klass)->dispose = pd_media_view_dispose;
 	G_OBJECT_CLASS(klass)->finalize = pd_media_view_finalize;
 }
 
@@ -738,6 +809,7 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 	gtk_widget_set_valign(empty, GTK_ALIGN_CENTER);
 
 	v->stack = gtk_stack_new();
+	gtk_widget_add_css_class(v->stack, "media-stack");
 	gtk_stack_add_named(GTK_STACK(v->stack), scroll, "list");
 	gtk_stack_add_named(GTK_STACK(v->stack), empty, "empty");
 	gtk_widget_set_vexpand(v->stack, TRUE);
@@ -755,6 +827,8 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 	gtk_box_append(GTK_BOX(v), v->count);
 	g_signal_connect(v->selection, "items-changed",
 			 G_CALLBACK(on_items_changed), v);
+	g_signal_connect(v->selection, "notify::selected-item",
+			 G_CALLBACK(on_selected), v);
 	on_items_changed(G_LIST_MODEL(v->selection), 0, 0, 0, v);
 	return GTK_WIDGET(v);
 }
@@ -798,6 +872,8 @@ void pd_media_view_set_store(PdMediaView *v, GListStore *store,
 				  GTK_SELECTION_MODEL(v->selection));
 	g_signal_connect(v->selection, "items-changed",
 			 G_CALLBACK(on_items_changed), v);
+	g_signal_connect(v->selection, "notify::selected-item",
+			 G_CALLBACK(on_selected), v);
 	on_items_changed(G_LIST_MODEL(v->selection), 0, 0, 0, v);
 }
 

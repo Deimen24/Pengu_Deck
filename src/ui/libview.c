@@ -7,6 +7,7 @@
  */
 #include "library.h"
 #include "libview.h"
+#include "window.h"
 #include "playlists.h"
 
 struct _PdLibView {
@@ -62,6 +63,7 @@ void pd_lib_view_rescan(PdLibView *v)
 {
 	if (v->cancel)
 		g_cancellable_cancel(v->cancel);
+	g_clear_object(&v->cancel);
 	v->cancel = g_cancellable_new();
 	gtk_widget_set_visible(v->spinner, TRUE);
 	gtk_widget_set_sensitive(v->rescan, FALSE);
@@ -254,6 +256,7 @@ static void on_new_playlist(GtkButton *b, PdLibView *v)
 	gtk_window_set_title(GTK_WINDOW(win), "New playlist");
 	gtk_window_set_transient_for(GTK_WINDOW(win), v->app->win);
 	gtk_window_set_modal(GTK_WINDOW(win), TRUE);
+	pd_window_close_on_escape(GTK_WINDOW(win));
 	gtk_window_set_default_size(GTK_WINDOW(win), 320, -1);
 	gtk_entry_set_placeholder_text(GTK_ENTRY(entry), "Playlist name");
 	gtk_widget_set_margin_top(box, 12);

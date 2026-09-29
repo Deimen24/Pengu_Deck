@@ -657,6 +657,10 @@ popover > contents {
 
 /* ---- track list -------------------------------------------------- */
 
+.media-stack {
+	background: @list-bg;
+}
+
 columnview.data-table > listview > row {
 	min-height: 28px;
 }

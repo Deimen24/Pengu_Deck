@@ -6,6 +6,7 @@
 
 #include "midi.h"
 #include "prefs.h"
+#include "window.h"
 #include "sccache.h"
 
 struct prefs {
@@ -872,6 +873,7 @@ void prefs_show(struct app *app, GCallback applied, gpointer data)
 	gtk_window_set_title(p->win, "Preferences");
 	gtk_window_set_transient_for(p->win, app->win);
 	gtk_window_set_modal(p->win, TRUE);
+	pd_window_close_on_escape(p->win);
 	gtk_window_set_default_size(p->win, 620, 480);
 
 	build_audio(p, nb);

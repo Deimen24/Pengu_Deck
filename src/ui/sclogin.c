@@ -4,6 +4,7 @@
  */
 #include "pd-build.h"
 #include "sclogin.h"
+#include "window.h"
 #include "soundcloud.h"
 
 #ifdef HAVE_WEBKIT
@@ -154,6 +155,7 @@ void sclogin_show(struct app *a, void (*done)(gpointer data), gpointer data)
 	gtk_window_set_title(l->win, "Log in to SoundCloud");
 	gtk_window_set_transient_for(l->win, a->win);
 	gtk_window_set_default_size(l->win, 520, 720);
+	pd_window_close_on_escape(l->win);
 
 	l->status = gtk_label_new("Sign in with your SoundCloud account. "
 				  "The session stays on this computer.");

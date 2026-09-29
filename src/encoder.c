@@ -40,6 +40,7 @@ struct encoder {
 	int filled;		/* samples in frame */
 	int64_t pts;
 	bool broken;
+	bool header;		/* avformat_write_header() succeeded */
 	unsigned int rate;
 };
 
@@ -191,6 +192,7 @@ struct encoder *encoder_open(const char *url, enum enc_format f,
 	ret = avformat_write_header(e->oc, NULL);
 	if (ret < 0)
 		goto averr;
+	e->header = true;
 	av_dict_free(&opts);
 	return e;
 
@@ -281,7 +283,7 @@ void encoder_close(struct encoder *e)
 {
 	if (!e)
 		return;
-	if (e->oc && e->cc && !e->broken && e->frame) {
+	if (e->header && !e->broken) {
 		convert(e, NULL, 0, true);
 		if (e->filled > 0)
 			emit_frame(e, e->filled);

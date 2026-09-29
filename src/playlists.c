@@ -318,10 +318,24 @@ void history_add(PdMediaItem *m)
 	FILE *f;
 
 	if (history) {
-		/* newest first */
-		g_object_set_data_full(G_OBJECT(m), "played-at",
+		/* newest first; a copy so each entry keeps its own time */
+		PdMediaItem *h = pd_media_item_new(m->source, m->key);
+
+		h->location = g_strdup(m->location);
+		h->title = g_strdup(m->title);
+		h->artist = g_strdup(m->artist);
+		h->album = g_strdup(m->album);
+		h->genre = g_strdup(m->genre);
+		h->duration = m->duration;
+		h->bpm = m->bpm;
+		h->mtime = m->mtime;
+		h->permalink = g_strdup(m->permalink);
+		h->track_auth = g_strdup(m->track_auth);
+		h->preview = m->preview;
+		g_object_set_data_full(G_OBJECT(h), "played-at",
 				       g_strdup(stamp), g_free);
-		g_list_store_insert(history, 0, m);
+		g_list_store_insert(history, 0, h);
+		g_object_unref(h);
 	}
 	f = history_path ? g_fopen(history_path, "a") : NULL;
 	if (f) {

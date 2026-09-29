@@ -585,3 +585,16 @@ void pd_window_load_file(PdWindow *w, const char *path)
 	app_load_path(w->app, w->next_deck, path);
 	w->next_deck = (w->next_deck + 1) % w->app->cfg.ndecks;
 }
+
+void pd_window_close_on_escape(GtkWindow *win)
+{
+	GtkEventController *c = gtk_shortcut_controller_new();
+
+	gtk_shortcut_controller_set_scope(GTK_SHORTCUT_CONTROLLER(c),
+					  GTK_SHORTCUT_SCOPE_GLOBAL);
+	gtk_shortcut_controller_add_shortcut(GTK_SHORTCUT_CONTROLLER(c),
+			gtk_shortcut_new(gtk_keyval_trigger_new(GDK_KEY_Escape,
+								0),
+					 gtk_named_action_new("window.close")));
+	gtk_widget_add_controller(GTK_WIDGET(win), c);
+}

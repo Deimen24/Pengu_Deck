@@ -16,4 +16,7 @@ void pd_window_load_file(PdWindow *w, const char *path);
 
 G_END_DECLS
 
+/* Close a secondary window with the Escape key. */
+void pd_window_close_on_escape(GtkWindow *win);
+
 #endif /* PD_UI_WINDOW_H */
