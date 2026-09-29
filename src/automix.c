@@ -22,6 +22,11 @@
 #define INTRO_MAX	32.0	/* an intro up to this long is blended over */
 #define CUT_MAX		8.0	/* when tempos cannot be matched */
 #define UNMIXABLE	10.0	/* score: tempo out of the pitch range */
+#define PREP_SECS	8.0	/* outgoing deck glides to the meeting tempo */
+#define RETURN_SECS	30.0	/* incoming deck glides back to 0 % after */
+#define LOCK_MAX	0.03	/* largest nudge the beat lock applies */
+#define LOCK_SECS	2.0	/* time the beat lock takes to close a gap */
+#define LOCK_DEAD	0.005	/* beats: closer than this counts as locked */
 
 enum state {
 	AM_IDLE,		/* nothing playing, waiting for the queue */
@@ -30,10 +35,26 @@ enum state {
 	AM_FADING,		/* crossfader on its way */
 };
 
+/* A pitch fader moved by automix over time; the user moving it wins. */
+struct glide {
+	bool on;
+	int deck;
+	gint64 start;
+	double secs;
+	double from, to;
+	double last;		/* value last written, to spot the user */
+};
+
 static struct {
 	struct app *app;
 	guint timer;
 	bool on;
+	bool match;		/* the tempos of the planned pair will meet */
+	double meet_from;	/* pitch for the outgoing deck at the blend */
+	double meet_to;		/* pitch for the incoming deck at the blend */
+	struct glide prep;	/* outgoing deck towards meet_from */
+	struct glide ret;	/* new active deck back to 0 % */
+	bool prepped;
 	enum state state;
 	int active;		/* deck currently carrying the mix */
 	int next;		/* deck holding the upcoming track */
@@ -128,7 +149,8 @@ static double match_score(int from, PdMediaItem *m)
 			r /= 2.0;
 		else if (r < 0.75)
 			r *= 2.0;
-		score += fabs(r - 1.0) > range ? UNMIXABLE :
+		/* both decks move, so twice the range can be bridged */
+		score += fabs(r - 1.0) > 2.0 * range ? UNMIXABLE :
 			 fabs(r - 1.0) / range;
 	} else {
 		score += 1.0;
@@ -206,6 +228,74 @@ static double side_value(int i)
 	}
 }
 
+static void glide_start(struct glide *g, int i, double to, double secs)
+{
+	g->on = true;
+	g->deck = i;
+	g->start = g_get_monotonic_time();
+	g->secs = fmax(secs, 0.1);
+	g->from = atomic_load(&deck(i)->pitch);
+	g->to = to;
+	g->last = g->from;
+	g_debug("automix: deck %c pitch %.1f%% -> %.1f%% over %.0f s",
+		app_deck_letter(i), g->from * 100.0, to * 100.0, g->secs);
+}
+
+static void glide_tick(struct glide *g)
+{
+	double now, t, p;
+
+	if (!g->on)
+		return;
+	now = atomic_load(&deck(g->deck)->pitch);
+	if (fabs(now - g->last) > 1e-4) {
+		/* the user took the fader: leave it alone */
+		g->on = false;
+		return;
+	}
+	t = (g_get_monotonic_time() - g->start) / 1e6 / g->secs;
+	if (t >= 1.0) {
+		t = 1.0;
+		g->on = false;
+	}
+	p = g->from + (g->to - g->from) * t;
+	atomic_store(&deck(g->deck)->pitch, (float)p);
+	g->last = (float)p;
+}
+
+/*
+ * Beat lock: while the blend runs, nudge the incoming deck so its beats
+ * stay on the outgoing deck's, closing any drift within LOCK_SECS.
+ */
+static void beat_lock(int from, int to)
+{
+	struct deck *m = deck(from), *d = deck(to);
+	struct track *mt = deck_track(m), *t = deck_track(d);
+	double b, mb, phase, mphase, e, bend, bpm;
+
+	if (!mt || !t || !atomic_load(&m->playing) || !atomic_load(&d->playing))
+		goto off;
+	b = track_beat_len(t);
+	mb = track_beat_len(mt);
+	bpm = deck_bpm(d);
+	if (b <= 0.0 || mb <= 0.0 || bpm <= 0.0)
+		goto off;
+	mphase = (deck_position(m) - atomic_load(&mt->beat_offset)) / mb;
+	phase = (deck_position(d) - atomic_load(&t->beat_offset)) / b;
+	e = (mphase - floor(mphase)) - (phase - floor(phase));
+	if (e > 0.5)
+		e -= 1.0;
+	else if (e < -0.5)
+		e += 1.0;
+	if (fabs(e) < LOCK_DEAD)
+		goto off;
+	bend = e * 60.0 / bpm / LOCK_SECS;
+	atomic_store(&d->bend, (float)CLAMP(bend, -LOCK_MAX, LOCK_MAX));
+	return;
+off:
+	atomic_store(&d->bend, 0.0f);
+}
+
 /* Load the head of the queue into deck @i, false when the queue is empty. */
 static bool load_next(int i)
 {
@@ -245,13 +335,29 @@ static void start_deck(int i, double at)
 		am.started = true;
 }
 
-/* Pitch the incoming deck would need to match the outgoing one. */
-static bool tempo_matchable(int from, int to)
+/*
+ * Where the two tempos meet: the outgoing deck slows (or speeds) to the
+ * geometric middle and the incoming one covers the rest, so neither
+ * jumps.  When that leaves the pitch range on one side, the incoming
+ * deck takes the whole difference.  False when no split fits.
+ */
+static bool tempo_meet(int from, int to, double *mf, double *mt)
 {
-	double p = deck_sync_pitch(deck(to), deck(from));
 	double range = am.app->cfg.pitch_range / 100.0;
+	double full = deck_sync_pitch(deck(to), deck(from));
+	double cur = atomic_load(&deck(from)->pitch);
+	double half;
 
-	return !isnan(p) && fabs(p) <= range;
+	if (isnan(full))
+		return false;
+	half = sqrt(1.0 + full);
+	*mt = half - 1.0;
+	*mf = (1.0 + cur) / half - 1.0;
+	if (fabs(*mt) <= range && fabs(*mf) <= range)
+		return true;
+	*mf = cur;
+	*mt = full;
+	return fabs(full) <= range;
 }
 
 /*
@@ -279,7 +385,15 @@ static void plan_transition(int from, int to)
 	am.plan_final = track_done(tf) && track_done(tt) &&
 			atomic_load(&tt->analysed);
 
-	match = c->automix_sync && tempo_matchable(from, to);
+	match = c->automix_sync &&
+		tempo_meet(from, to, &am.meet_from, &am.meet_to);
+	am.match = match;
+	if (match)
+		g_debug("automix: tempo plan %c %.1f%% -> %.1f%%, %c at "
+			"%.1f%%", app_deck_letter(from),
+			atomic_load(&deck(from)->pitch) * 100.0,
+			am.meet_from * 100.0, app_deck_letter(to),
+			am.meet_to * 100.0);
 	bpm = deck_bpm(deck(from));
 	outro = analyze_quiet_tail(tf);
 	intro = analyze_quiet_head(tt, (size_t)deck(to)->cue);
@@ -314,14 +428,20 @@ static void begin_fade(void)
 	struct deck *from = deck(am.active), *to = deck(am.next);
 	double range = am.app->cfg.pitch_range / 100.0;
 
+	if (!am.planned)
+		plan_transition(am.active, am.next);
+	am.prep.on = false;
+	am.ret.on = false;
 	if (am.app->cfg.automix_sync) {
-		double p = deck_sync_pitch(to, from);
+		double p;
 
+		if (am.match && am.prepped)
+			atomic_store(&from->pitch, (float)am.meet_from);
+		/* whatever the outgoing deck runs at now, match it */
+		p = deck_sync_pitch(to, from);
 		if (!isnan(p) && fabs(p) <= range)
 			atomic_store(&to->pitch, (float)p);
 	}
-	if (!am.planned)
-		plan_transition(am.active, am.next);
 	am.started = true;
 	am.app->by_hand[am.next] = FALSE;
 	start_deck(am.next, am.plan_start);
@@ -338,10 +458,16 @@ static void begin_fade(void)
 static void end_fade(void)
 {
 	deck_play(deck(am.active), false);
+	atomic_store(&deck(am.next)->bend, 0.0f);
 	am.app->by_hand[am.active] = FALSE;
 	am.active = am.next;
 	am.next = -1;
 	am.state = AM_PLAYING;
+	am.prepped = false;
+	/* back to the track's own tempo, slowly enough not to hear it */
+	if (am.app->cfg.automix_sync &&
+	    fabs(atomic_load(&deck(am.active)->pitch)) > 1e-4)
+		glide_start(&am.ret, am.active, 0.0, RETURN_SECS);
 }
 
 /* Pick the deck to start on: a playing A/B deck, else an empty one. */
@@ -473,6 +599,14 @@ static void tick_preloaded(void)
 			   app_deck_letter(am.next));
 		return;
 	}
+	if (am.app->cfg.automix_sync && am.match && !am.prepped &&
+	    remaining(am.active) <= am.plan_len + PREP_SECS) {
+		/* ease the outgoing deck to the meeting tempo before the blend */
+		am.prepped = true;
+		am.ret.on = false;
+		glide_start(&am.prep, am.active, am.meet_from,
+			    fmin(PREP_SECS, remaining(am.active) - am.plan_len));
+	}
 	if (am.force || !atomic_load(&deck(am.active)->playing) ||
 	    remaining(am.active) <= am.plan_len) {
 		am.force = false;
@@ -490,6 +624,8 @@ static void tick_fading(void)
 		t = 1.0;
 	x = am.fade_from + (am.fade_to - am.fade_from) * t;
 	atomic_store(&am.app->engine.xfader, (float)x);
+	if (am.app->cfg.automix_sync && am.match)
+		beat_lock(am.active, am.next);
 	set_status("Automix: mixing %c → %c over %d s",
 		   app_deck_letter(am.active), app_deck_letter(am.next),
 		   (int)secs);
@@ -499,6 +635,8 @@ static void tick_fading(void)
 
 static gboolean tick(gpointer data)
 {
+	glide_tick(&am.prep);
+	glide_tick(&am.ret);
 	switch (am.state) {
 	case AM_IDLE:
 		tick_idle();

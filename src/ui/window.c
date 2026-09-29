@@ -42,7 +42,9 @@ struct _PdWindow {
 	guint fit_tick;
 	int fit_w, fit_h;	/* size the compact level was chosen for */
 	int saved_split;	/* from the config, applied on the first frame */
+	int user_split;		/* where the user put the divider */
 	gboolean fitted;
+	gboolean adjusting;	/* the position change is ours, not a drag */
 	guint split_save;
 };
 
@@ -601,7 +603,10 @@ static gboolean fit_tick(GtkWidget *widget, GdkFrameClock *clock,
 			pos += gtk_widget_get_margin_top(w->top) +
 			       gtk_widget_get_margin_bottom(w->top);
 		}
+		w->adjusting = TRUE;
 		gtk_paned_set_position(GTK_PANED(w->paned), pos);
+		w->adjusting = FALSE;
+		w->user_split = pos;
 		w->app->cfg.ui_split = pos;
 		g_signal_connect(w->paned, "notify::position",
 				 G_CALLBACK(on_split), w);
@@ -609,16 +614,17 @@ static gboolean fit_tick(GtkWidget *widget, GdkFrameClock *clock,
 	}
 	/*
 	 * A shrunk start child is allocated its minimum and clipped, so
-	 * its own height does not tell: the room is the split position,
-	 * or what the library leaves when the window is short.
+	 * its own height does not tell: the room is where the user put
+	 * the divider, or less when the window is too short for that and
+	 * the library's minimum.
 	 */
 	{
 		int end_min, paned_h = gtk_widget_get_height(w->paned);
 
 		gtk_widget_measure(w->notebook, GTK_ORIENTATION_VERTICAL, -1,
 				   &end_min, NULL, NULL, NULL);
-		h = MIN(gtk_paned_get_position(GTK_PANED(w->paned)),
-			paned_h - end_min - 4);
+		h = MIN(w->user_split, paned_h - end_min - 4);
+		h = MAX(h, 0);
 	}
 	wd += gtk_widget_get_margin_start(w->top) +
 	      gtk_widget_get_margin_end(w->top);
@@ -634,6 +640,13 @@ static gboolean fit_tick(GtkWidget *widget, GdkFrameClock *clock,
 				   &min_h, NULL, NULL, NULL);
 		if (min_h <= h && min_w <= wd)
 			break;
+	}
+	/* even the smallest decks are never cut: the library gives way */
+	h = MAX(h, min_h);
+	if (gtk_paned_get_position(GTK_PANED(w->paned)) != h) {
+		w->adjusting = TRUE;
+		gtk_paned_set_position(GTK_PANED(w->paned), h);
+		w->adjusting = FALSE;
 	}
 	g_debug("fit: %dx%d -> level %d (min %dx%d)", wd, h, level, min_w,
 		min_h);
@@ -652,7 +665,10 @@ static gboolean save_split(gpointer data)
 /* Remember the split; written out once the drag has settled. */
 static void on_split(GObject *paned, GParamSpec *ps, PdWindow *w)
 {
-	w->app->cfg.ui_split = gtk_paned_get_position(GTK_PANED(paned));
+	if (w->adjusting)
+		return;
+	w->user_split = gtk_paned_get_position(GTK_PANED(paned));
+	w->app->cfg.ui_split = w->user_split;
 	if (w->split_save)
 		g_source_remove(w->split_save);
 	w->split_save = g_timeout_add_seconds(2, save_split, w);
@@ -774,7 +790,8 @@ GtkWidget *pd_window_new(struct app *app)
 	gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE);
 	/* the deck area may be dragged smaller: fit_tick() compacts it */
 	gtk_paned_set_shrink_start_child(GTK_PANED(paned), TRUE);
-	gtk_paned_set_shrink_end_child(GTK_PANED(paned), FALSE);
+	/* a short window takes room from the library, never the decks */
+	gtk_paned_set_shrink_end_child(GTK_PANED(paned), TRUE);
 	gtk_widget_set_vexpand(paned, TRUE);
 	gtk_box_append(GTK_BOX(root), paned);
 	w->top = top;

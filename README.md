@@ -97,8 +97,9 @@ session (the green rows); press it again for the whole list.
 
 Drag the divider above the Library tabs to give the library more room.
 The decks and the mixer shrink to fit: loop controls go first, then hot
-cues, overview and platter, then modes and pitch, then the waveform,
-until only title and transport remain. Drag it back down and everything
+cues and platter, then modes and pitch, then the zoomed waveform, until
+only title, full track overview and transport remain. A short window
+takes room from the library, never from the decks. Drag it back down and everything
 returns. The split is remembered.
 
 ## Automix
@@ -129,6 +130,13 @@ two tracks, so every mix has its own length:
 
 The length is clamped to 3–45 s and to what is left of the outgoing
 track; the slider value is the minimum. Off, the slider value is used.
+
+With **Sync tempo** on the two decks meet halfway: 8 s before the blend
+the playing deck eases towards the middle tempo, the incoming deck
+starts at the rest of the difference, and the beats are kept locked
+while the crossfader moves. Afterwards the new deck glides back to its
+own tempo over 30 s. Touching a pitch fader while it glides takes it
+over.
 
 ## MIDI controllers
 

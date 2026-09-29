@@ -1062,9 +1062,9 @@ void pd_deck_view_set_compact(PdDeckView *v, int level)
 	if (level == v->compact)
 		return;
 	v->compact = level;
+	/* the full track overview outlives every button but transport */
 	gtk_widget_set_visible(v->loop_row, level < 1);
 	gtk_widget_set_visible(v->hotcue_row, level < 2);
-	gtk_widget_set_visible(v->overview, level < 2);
 	gtk_widget_set_visible(v->platter, level < 2);
 	gtk_widget_set_visible(v->modes_row, level < 3);
 	gtk_widget_set_visible(v->pitch_box, level < 3);
