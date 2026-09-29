@@ -682,11 +682,10 @@ struct tab_drop {
 	int page;
 };
 
-/* Hovering a tab with a track switches to it, so the drop can go on. */
+/* Only the Automix tab takes drops; the page stays where it is. */
 static GdkDragAction tab_enter(GtkDropTarget *t, double x, double y,
 			       struct tab_drop *d)
 {
-	gtk_notebook_set_current_page(GTK_NOTEBOOK(d->w->notebook), d->page);
 	return d->page == 2 ? GDK_ACTION_COPY : 0;
 }
 
@@ -698,11 +697,15 @@ static gboolean tab_drop(GtkDropTarget *t, const GValue *val, double x,
 	if (d->page != 2)
 		return FALSE;
 	if (G_VALUE_HOLDS(val, PD_TYPE_MEDIA_ITEM)) {
-		g_list_store_append(a->queue, g_value_get_object(val));
+		PdMediaItem *m = g_value_get_object(val);
+
+		g_list_store_append(a->queue, m);
+		app_toast(a, "Queued \"%s\"", m->title);
 		return TRUE;
 	}
 	if (G_VALUE_HOLDS(val, GDK_TYPE_FILE_LIST)) {
 		GSList *l;
+		guint n = 0;
 
 		for (l = g_value_get_boxed(val); l; l = l->next) {
 			char *path = g_file_get_path(l->data);
@@ -712,9 +715,11 @@ static gboolean tab_drop(GtkDropTarget *t, const GValue *val, double x,
 			if (m) {
 				g_list_store_append(a->queue, m);
 				g_object_unref(m);
+				n++;
 			}
 			g_free(path);
 		}
+		app_toast(a, "Queued %u track%s", n, n == 1 ? "" : "s");
 		return TRUE;
 	}
 	return FALSE;

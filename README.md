@@ -105,7 +105,7 @@ returns. The split is remembered.
 ## Automix
 
 Queue tracks from the Library or SoundCloud tab (**+ Queue**, context
-menu, or drag rows onto the **Automix** tab or into the queue; audio
+menu, or drag rows onto the **Automix** tab (the list stays where you are) or into the queue; audio
 files from the file manager drop there too; Ctrl or Shift click selects
 several) and press **AUTOMIX**. The Automix tab shows which decks play
 now and next, and every queued row carries key, tempo and the pitch it
