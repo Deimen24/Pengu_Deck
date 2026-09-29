@@ -98,7 +98,6 @@ static gboolean queue_drop_value(struct app *a, const GValue *val, guint pos)
 struct row {
 	GtkWidget *num;
 	GtkWidget *title;
-	GtkWidget *sub;
 	GtkWidget *key;
 	GtkWidget *bpm;
 	GtkWidget *pitch;
@@ -262,12 +261,7 @@ static void setup_row(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 	gtk_widget_add_css_class(r->title, "row-title");
 	gtk_label_set_xalign(GTK_LABEL(r->title), 0.0f);
 	gtk_label_set_ellipsize(GTK_LABEL(r->title), PANGO_ELLIPSIZE_END);
-	r->sub = gtk_label_new("");
-	gtk_widget_add_css_class(r->sub, "row-sub");
-	gtk_label_set_xalign(GTK_LABEL(r->sub), 0.0f);
-	gtk_label_set_ellipsize(GTK_LABEL(r->sub), PANGO_ELLIPSIZE_END);
 	gtk_box_append(GTK_BOX(text), r->title);
-	gtk_box_append(GTK_BOX(text), r->sub);
 	gtk_widget_set_hexpand(text, TRUE);
 	gtk_widget_set_valign(text, GTK_ALIGN_CENTER);
 
@@ -323,9 +317,13 @@ static void bind_row(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 	char *s;
 
 	set_number(li, r->num);
-	gtk_label_set_text(GTK_LABEL(r->title), m->title ? m->title : "");
-	gtk_label_set_text(GTK_LABEL(r->sub), m->artist && *m->artist ?
-			   m->artist : "Unknown artist");
+	/* one line per track, like the library */
+	if (m->artist && *m->artist)
+		s = g_strdup_printf("%s  –  %s", m->artist, m->title);
+	else
+		s = g_strdup(m->title ? m->title : "");
+	gtk_label_set_text(GTK_LABEL(r->title), s);
+	g_free(s);
 
 	key = cuestore_key(m->key);
 	gtk_widget_set_visible(r->key, key >= 0);
@@ -501,13 +499,10 @@ static gboolean refresh(gpointer data)
 	g_free(s);
 	if (now && next)
 		line = g_strdup_printf("%s   →   %s", now, next);
-	else if (now)
-		line = g_strdup(now);
 	else
-		line = g_strdup(automix_enabled() ? "" :
-				"Press AUTOMIX to play the queue on decks "
-				"A and B");
+		line = g_strdup(now ? now : "");
 	gtk_label_set_text(GTK_LABEL(v->now), line);
+	gtk_widget_set_visible(v->now, *line != '\0');
 	g_free(line);
 	g_free(now);
 	g_free(next);
@@ -587,24 +582,9 @@ GtkWidget *pd_queue_view_new(struct app *app)
 	gtk_box_append(GTK_BOX(bar), tool("Next ⏭", "Mix into the next "
 					  "track now", G_CALLBACK(on_next),
 					  v));
-	v->now = gtk_label_new("");
-	gtk_widget_add_css_class(v->now, "automix-now");
-	gtk_widget_set_hexpand(v->now, TRUE);
-	gtk_label_set_xalign(GTK_LABEL(v->now), 0.0f);
-	gtk_label_set_ellipsize(GTK_LABEL(v->now), PANGO_ELLIPSIZE_END);
-	gtk_widget_set_margin_start(v->now, 10);
-	gtk_box_append(GTK_BOX(bar), v->now);
-	v->status = gtk_label_new("");
-	gtk_widget_add_css_class(v->status, "automix-status");
-	gtk_label_set_xalign(GTK_LABEL(v->status), 1.0f);
-	gtk_box_append(GTK_BOX(bar), v->status);
-	gtk_widget_add_css_class(bar, "toolbar");
-	gtk_box_append(GTK_BOX(v), bar);
-
-	/* settings line */
-	bar = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 	l = gtk_label_new("Transition");
 	gtk_widget_add_css_class(l, "dim-label");
+	gtk_widget_set_margin_start(l, 12);
 	gtk_box_append(GTK_BOX(bar), l);
 	spin = gtk_spin_button_new_with_range(2, 90, 1);
 	gtk_spin_button_set_value(GTK_SPIN_BUTTON(spin), app->cfg.automix_fade);
@@ -634,8 +614,22 @@ GtkWidget *pd_queue_view_new(struct app *app)
 		   G_CALLBACK(on_sync), v);
 	gtk_widget_set_margin_start(l, 12);
 	gtk_box_append(GTK_BOX(bar), l);
-	gtk_widget_add_css_class(bar, "toolbar");
+	v->status = gtk_label_new("");
+	gtk_widget_add_css_class(v->status, "automix-status");
+	gtk_widget_set_hexpand(v->status, TRUE);
+	gtk_label_set_xalign(GTK_LABEL(v->status), 1.0f);
+	gtk_label_set_ellipsize(GTK_LABEL(v->status), PANGO_ELLIPSIZE_START);
+	gtk_box_append(GTK_BOX(bar), v->status);
 	gtk_box_append(GTK_BOX(v), bar);
+
+	/* what plays now and next: one slim line, only while it runs */
+	v->now = gtk_label_new("");
+	gtk_widget_add_css_class(v->now, "automix-now");
+	gtk_label_set_xalign(GTK_LABEL(v->now), 0.0f);
+	gtk_label_set_ellipsize(GTK_LABEL(v->now), PANGO_ELLIPSIZE_END);
+	gtk_widget_set_margin_start(v->now, 8);
+	gtk_widget_set_visible(v->now, FALSE);
+	gtk_box_append(GTK_BOX(v), v->now);
 
 	/* the queue */
 	v->selection = gtk_single_selection_new(
@@ -687,7 +681,6 @@ GtkWidget *pd_queue_view_new(struct app *app)
 	gtk_widget_set_hexpand(v->count, TRUE);
 	gtk_label_set_xalign(GTK_LABEL(v->count), 1.0f);
 	gtk_box_append(GTK_BOX(bar), v->count);
-	gtk_widget_add_css_class(bar, "toolbar");
 	gtk_box_append(GTK_BOX(v), bar);
 
 	drop = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_COPY);

@@ -396,8 +396,22 @@ button.queue-button {
 }
 
 .automix-now {
-	color: @fg;
-	font-weight: 600;
+	color: @dim;
+	font-size: 12px;
+}
+
+spinbutton {
+	min-height: 26px;
+}
+
+spinbutton > button {
+	min-height: 26px;
+	min-width: 26px;
+	padding: 0 4px;
+}
+
+spinbutton > text {
+	min-width: 30px;
 }
 
 .queue-pitch {
@@ -435,11 +449,7 @@ listview.queue-list > row:active {
 	background: #222a3a;
 }
 
-.toolbar > button,
-.toolbar > togglebutton,
-.toolbar > spinbutton {
-	min-height: 30px;
-}
+
 
 /* ---- scales ------------------------------------------------------ */
 
