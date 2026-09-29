@@ -19,6 +19,7 @@
 @define-color hot #f472b6;
 @define-color rec #ef4444;
 @define-color list-bg #0e1118;
+@define-color list-alt #161b27;
 
 * {
 	outline: none;
@@ -471,9 +472,14 @@ listview.queue-list > row {
 	padding: 1px 0;
 }
 
+columnview.data-table > listview > row:nth-child(even),
+listview.queue-list > row:nth-child(even) {
+	background: @list-alt;
+}
+
 columnview.data-table > listview > row:hover,
 listview.queue-list > row:hover {
-	background: #161a24;
+	background: #1b2130;
 }
 
 /* selected and played rows fade from a tint on the left into the list */
@@ -485,9 +491,9 @@ listview.queue-list > row:selected {
 
 columnview.data-table > listview > row.played,
 listview.queue-list > row.played {
-	background: linear-gradient(90deg, alpha(@dim, 0.24),
-				    alpha(@dim, 0.02));
-	box-shadow: inset 3px 0 0 alpha(@dim, 0.7);
+	background: linear-gradient(90deg, alpha(@play, 0.16),
+				    alpha(@play, 0.02));
+	box-shadow: inset 3px 0 0 alpha(@play, 0.7);
 }
 
 row.played .row-title {
@@ -506,7 +512,7 @@ row.played .pill {
 
 columnview.data-table cell,
 listview.queue-list > row > box {
-	padding: 4px 8px;
+	padding: 2px 8px;
 }
 
 columnview.data-table cell label.played {
@@ -652,17 +658,16 @@ popover > contents {
 /* ---- track list -------------------------------------------------- */
 
 columnview.data-table > listview > row {
-	min-height: 40px;
-	border-bottom: 1px solid #151923;
+	min-height: 28px;
 }
 
 .row-title {
 	font-weight: 600;
-	font-size: 13px;
+	font-size: 12.5px;
 }
 
 .row-sub {
-	font-size: 11px;
+	font-size: 12px;
 	color: @dim;
 }
 
@@ -680,7 +685,7 @@ columnview.data-table > listview > row {
 	font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace;
 	font-size: 11px;
 	font-weight: 700;
-	padding: 3px 9px;
+	padding: 1px 7px;
 	border-radius: 4px;
 	border: none;
 	background: @panel2;
@@ -692,10 +697,10 @@ columnview.data-table > listview > row {
 }
 
 button.row-preview {
-	min-width: 28px;
-	min-height: 28px;
-	padding: 2px;
-	border-radius: 14px;
+	min-width: 22px;
+	min-height: 22px;
+	padding: 1px;
+	border-radius: 11px;
 	background: transparent;
 	border-color: transparent;
 	color: @dim;

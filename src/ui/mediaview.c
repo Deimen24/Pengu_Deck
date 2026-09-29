@@ -118,6 +118,9 @@ static int cmp_bpm(gconstpointer a, gconstpointer b, gpointer data)
 enum column {
 	COL_STATE,
 	COL_TRACK,
+	COL_ARTIST,
+	COL_ALBUM,
+	COL_GENRE,
 	COL_KEY,
 	COL_BPM,
 	COL_DURATION,
@@ -135,21 +138,18 @@ static void on_preview_clicked(GtkButton *b, GtkListItem *li)
 
 static GtkWidget *make_cell(PdMediaView *v, enum column col, GtkListItem *li)
 {
-	GtkWidget *w, *l;
+	GtkWidget *w;
 
 	switch (col) {
 	case COL_TRACK:
-		w = gtk_box_new(GTK_ORIENTATION_VERTICAL, 1);
-		l = gtk_label_new("");
-		gtk_widget_add_css_class(l, "row-title");
-		gtk_label_set_xalign(GTK_LABEL(l), 0.0f);
-		gtk_label_set_ellipsize(GTK_LABEL(l), PANGO_ELLIPSIZE_END);
-		gtk_box_append(GTK_BOX(w), l);
-		l = gtk_label_new("");
-		gtk_widget_add_css_class(l, "row-sub");
-		gtk_label_set_xalign(GTK_LABEL(l), 0.0f);
-		gtk_label_set_ellipsize(GTK_LABEL(l), PANGO_ELLIPSIZE_END);
-		gtk_box_append(GTK_BOX(w), l);
+	case COL_ARTIST:
+	case COL_ALBUM:
+	case COL_GENRE:
+		w = gtk_label_new("");
+		gtk_widget_add_css_class(w, col == COL_TRACK ? "row-title" :
+					 "row-sub");
+		gtk_label_set_xalign(GTK_LABEL(w), 0.0f);
+		gtk_label_set_ellipsize(GTK_LABEL(w), PANGO_ELLIPSIZE_END);
 		gtk_widget_set_valign(w, GTK_ALIGN_CENTER);
 		return w;
 	case COL_KEY:
@@ -229,7 +229,8 @@ static void setup_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 	GtkWidget *w = make_cell(v, col, li);
 	GtkDragSource *src = gtk_drag_source_new();
 
-	gtk_widget_set_hexpand(w, col == COL_TRACK);
+	gtk_widget_set_hexpand(w, col == COL_TRACK || col == COL_ARTIST ||
+			       col == COL_ALBUM);
 	/* Every cell is a drag handle for its row. */
 	gtk_drag_source_set_actions(src, GDK_ACTION_COPY);
 	g_signal_connect(src, "prepare", G_CALLBACK(drag_prepare), li);
@@ -238,26 +239,18 @@ static void setup_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 	gtk_list_item_set_child(li, w);
 }
 
-static void bind_track(GtkWidget *box, PdMediaItem *m)
+static void bind_title(GtkWidget *l, PdMediaItem *m)
 {
-	GtkWidget *title = gtk_widget_get_first_child(box);
-	GtkWidget *sub = gtk_widget_get_next_sibling(title);
-	GString *s = g_string_new(m->artist && *m->artist ? m->artist :
-				  "Unknown artist");
-	char *t;
+	char *t = m->source == MEDIA_SOUNDCLOUD && m->preview ?
+		  g_strdup_printf("%s (preview)", m->title) : g_strdup(m->title);
 
-	if (m->album && *m->album)
-		g_string_append_printf(s, "  ·  %s", m->album);
-	if (m->genre && *m->genre)
-		g_string_append_printf(s, "  ·  %s", m->genre);
-	if (m->source == MEDIA_SOUNDCLOUD)
-		g_string_append(s, "  ·  SoundCloud");
-	t = m->source == MEDIA_SOUNDCLOUD && m->preview ?
-	    g_strdup_printf("%s (preview)", m->title) : g_strdup(m->title);
-	gtk_label_set_text(GTK_LABEL(title), t);
-	gtk_label_set_text(GTK_LABEL(sub), s->str);
+	gtk_label_set_text(GTK_LABEL(l), t);
 	g_free(t);
-	g_string_free(s, TRUE);
+}
+
+static void bind_text(GtkWidget *l, const char *text, const char *none)
+{
+	gtk_label_set_text(GTK_LABEL(l), text && *text ? text : none);
 }
 
 /* The pill takes one of twelve "camelot-N" classes for its colour. */
@@ -334,7 +327,17 @@ static void bind_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 		break;
 	}
 	case COL_TRACK:
-		bind_track(w, m);
+		bind_title(w, m);
+		break;
+	case COL_ARTIST:
+		bind_text(w, m->artist, "Unknown artist");
+		break;
+	case COL_ALBUM:
+		bind_text(w, m->album, m->source == MEDIA_SOUNDCLOUD ?
+			  "SoundCloud" : "");
+		break;
+	case COL_GENRE:
+		bind_text(w, m->genre, "");
 		break;
 	case COL_KEY:
 		bind_key(w, m);
@@ -684,7 +687,7 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 	gtk_column_view_set_single_click_activate(GTK_COLUMN_VIEW(v->view),
 						  FALSE);
 	gtk_column_view_set_show_row_separators(GTK_COLUMN_VIEW(v->view),
-						TRUE);
+						FALSE);
 	gtk_widget_add_css_class(v->view, "data-table");
 
 #define STR_SORTER(field) \
@@ -694,7 +697,10 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 	GTK_SORTER(gtk_custom_sorter_new(cmp_double, \
 		GSIZE_TO_POINTER(G_STRUCT_OFFSET(PdMediaItem, field)), NULL))
 	add_column(v, "", COL_STATE, NULL, FALSE, 56);
-	add_column(v, "Track", COL_TRACK, STR_SORTER(title), TRUE, 0);
+	add_column(v, "Title", COL_TRACK, STR_SORTER(title), TRUE, 0);
+	add_column(v, "Artist", COL_ARTIST, STR_SORTER(artist), TRUE, 0);
+	add_column(v, "Album", COL_ALBUM, STR_SORTER(album), TRUE, 0);
+	add_column(v, "Genre", COL_GENRE, STR_SORTER(genre), FALSE, 110);
 	add_column(v, "Key", COL_KEY,
 		   GTK_SORTER(gtk_custom_sorter_new(cmp_key, NULL, NULL)),
 		   FALSE, 92);
