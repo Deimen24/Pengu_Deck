@@ -1,3 +1,13 @@
+pengu-deck (0.1.4-1) unstable; urgency=medium
+
+  * Automix: phrase aligned blends, tempo meeting and beat lock, bass and
+    mid hand over, level matching, silence never played, smart order.
+  * SoundCloud playlists page, Full tracks toggle, login kept across starts.
+  * Resizable library pane with compacting decks, drag and drop to automix.
+  * Lost clicks in the lists fixed.
+
+ -- deimen24 <da.husmann24@gmail.com>  Tue, 29 Sep 2026 21:40:00 +0000
+
 pengu-deck (0.1.3-1) unstable; urgency=medium
 
   * SoundCloud through the official API with OAuth 2.1 and PKCE.

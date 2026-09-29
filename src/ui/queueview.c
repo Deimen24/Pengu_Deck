@@ -146,8 +146,10 @@ static void bind_pitch(struct row *r, PdMediaItem *m)
 		if (v)
 			range = v->app->cfg.pitch_range / 100.0;
 	}
-	gtk_widget_add_css_class(r->pitch, fabs(p) <= range ? "near" :
-				 fabs(p) <= 2.0 * range ? "" : "far");
+	if (fabs(p) <= range)
+		gtk_widget_add_css_class(r->pitch, "near");
+	else if (fabs(p) > 2.0 * range)
+		gtk_widget_add_css_class(r->pitch, "far");
 }
 
 static void bind_row_state(GtkListItem *li)

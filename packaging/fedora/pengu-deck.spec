@@ -1,5 +1,5 @@
 Name:           pengu-deck
-Version:        0.1.3
+Version:        0.1.4
 Release:        1%{?dist}
 Summary:        Two deck DJ software with local files and SoundCloud streaming
 License:        GPL-3.0-or-later
@@ -48,6 +48,13 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.deimen24.Pe
 %{_datadir}/icons/hicolor/128x128/apps/io.github.deimen24.PenguDeck.png
 
 %changelog
+* Tue Sep 29 2026 deimen24 - 0.1.4-1
+- Automix: phrase aligned blends, tempo meeting and beat lock, bass and
+  mid hand over, level matching, silence never played, smart order
+- SoundCloud playlists page, Full tracks toggle, login kept across starts
+- Resizable library pane with compacting decks, drag and drop to automix
+- Lost clicks in the lists fixed
+
 * Tue Sep 29 2026 deimen24 - 0.1.3-1
 - SoundCloud through the official API with OAuth 2.1 and PKCE
 - Login in the system browser, WebKitGTK no longer needed

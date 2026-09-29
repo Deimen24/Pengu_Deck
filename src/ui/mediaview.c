@@ -621,6 +621,20 @@ static void on_played_only(GtkToggleButton *b, PdMediaView *v)
 			   GTK_FILTER_CHANGE_LESS_STRICT);
 }
 
+/* The track's SoundCloud address, for a browser or another app. */
+static void on_copy_link(GSimpleAction *a, GVariant *p, gpointer data)
+{
+	PdMediaView *v = data;
+	PdMediaItem *m = selected(v);
+	GdkClipboard *clip;
+
+	if (!m || !m->permalink)
+		return;
+	clip = gtk_widget_get_clipboard(GTK_WIDGET(v));
+	gdk_clipboard_set_text(clip, m->permalink);
+	app_toast(v->app, "Link copied: %s", m->permalink);
+}
+
 GtkWidget *pd_media_view_played_button(PdMediaView *v)
 {
 	GtkWidget *b = gtk_toggle_button_new_with_label("Played");
@@ -689,6 +703,7 @@ static GMenuModel *build_menu(PdMediaView *v)
 	if (v->store == v->app->sc_results) {
 		g_menu_append(menu, "Download to cache", "media.cache");
 		g_menu_append(menu, "Open on SoundCloud", "media.open-link");
+		g_menu_append(menu, "Copy SoundCloud link", "media.copy-link");
 	}
 	return G_MENU_MODEL(menu);
 }
@@ -718,6 +733,7 @@ static GtkWidget *build_popover(PdMediaView *v)
 		{ "unplaylist", on_remove_from_playlist },
 		{ "cache", on_cache },
 		{ "open-link", on_open_link },
+		{ "copy-link", on_copy_link },
 	};
 	GMenuModel *menu = build_menu(v);
 	GtkWidget *pop;

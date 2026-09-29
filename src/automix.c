@@ -24,9 +24,10 @@
 #define UNMIXABLE	10.0	/* score: tempo out of the pitch range */
 #define PREP_SECS	8.0	/* outgoing deck glides to the meeting tempo */
 #define RETURN_SECS	30.0	/* incoming deck glides back to 0 % after */
-#define LOCK_MAX	0.03	/* largest nudge the beat lock applies */
-#define LOCK_SECS	2.0	/* time the beat lock takes to close a gap */
-#define LOCK_DEAD	0.005	/* beats: closer than this counts as locked */
+#define LOCK_MAX	0.02	/* largest nudge the beat lock applies */
+#define LOCK_SECS	1.5	/* time the beat lock takes to close a gap */
+#define LOCK_INT	0.4	/* per second: integral gain against steady drift */
+#define LOCK_DEAD	0.001	/* beats: closer than this counts as locked */
 #define LOW_CUT		-20.0	/* dB the lows are taken down to in a blend */
 #define MID_DIP		-8.0	/* dB the outgoing mids give way by the end */
 #define MID_IN		-6.0	/* dB the incoming mids start below */
@@ -46,6 +47,7 @@ enum state {
 struct glide {
 	bool on;
 	int deck;
+	_Atomic float *target;	/* pitch or trim of that deck */
 	gint64 start;
 	double secs;
 	double from, to;
@@ -61,6 +63,14 @@ static struct {
 	double meet_to;		/* pitch for the incoming deck at the blend */
 	struct glide prep;	/* outgoing deck towards meet_from */
 	struct glide ret;	/* new active deck back to 0 % */
+	struct glide trim;	/* incoming trim back to what it was */
+	double shape;		/* fade curve power: >1 brings the new one in slowly */
+	double lock_int;	/* beat lock: accumulated drift, in beats */
+	double lock_err;	/* last phase gap seen, for the log */
+	int snaps;		/* exact corrections done at the blend start */
+	gint64 lock_time;
+	double level_db;	/* incoming level relative to outgoing at the blend */
+	float trim_to;		/* incoming trim before the blend */
 	bool prepped;
 	gint64 due_at;		/* the blend is due, waiting for a downbeat */
 	double tempo_ratio;	/* outgoing over incoming tempo at the blend */
@@ -259,17 +269,24 @@ static double side_value(int i)
 	}
 }
 
-static void glide_start(struct glide *g, int i, double to, double secs)
+static void glide_to(struct glide *g, int i, _Atomic float *target,
+		     double to, double secs, const char *what)
 {
 	g->on = true;
 	g->deck = i;
+	g->target = target;
 	g->start = g_get_monotonic_time();
 	g->secs = fmax(secs, 0.1);
-	g->from = atomic_load(&deck(i)->pitch);
+	g->from = atomic_load(target);
 	g->to = to;
 	g->last = g->from;
-	g_debug("automix: deck %c pitch %.1f%% -> %.1f%% over %.0f s",
-		app_deck_letter(i), g->from * 100.0, to * 100.0, g->secs);
+	g_debug("automix: deck %c %s %.2f -> %.2f over %.0f s",
+		app_deck_letter(i), what, g->from, to, g->secs);
+}
+
+static void glide_start(struct glide *g, int i, double to, double secs)
+{
+	glide_to(g, i, &deck(i)->pitch, to, secs, "pitch");
 }
 
 static void glide_tick(struct glide *g)
@@ -278,7 +295,7 @@ static void glide_tick(struct glide *g)
 
 	if (!g->on)
 		return;
-	now = atomic_load(&deck(g->deck)->pitch);
+	now = atomic_load(g->target);
 	if (fabs(now - g->last) > 1e-4) {
 		/* the user took the fader: leave it alone */
 		g->on = false;
@@ -290,19 +307,54 @@ static void glide_tick(struct glide *g)
 		g->on = false;
 	}
 	p = g->from + (g->to - g->from) * t;
-	atomic_store(&deck(g->deck)->pitch, (float)p);
+	atomic_store(g->target, (float)p);
 	g->last = (float)p;
 }
 
 /*
+ * Where deck @to should start so that its beats and bars fall on deck
+ * @from's right now: the point on @to's grid nearest to @at with the
+ * same position inside the bar as @from has.  Seeking once before the
+ * start beats seeking a deck that already plays.
+ */
+static double aligned_start(int to, int from, double at)
+{
+	struct track *t = deck_track(deck(to)), *mt = deck_track(deck(from));
+	double b, mb, off, moff, mbeats, beats, want;
+
+	if (!t || !mt)
+		return at;
+	b = track_beat_len(t);
+	mb = track_beat_len(mt);
+	if (b <= 0.0 || mb <= 0.0)
+		return at;
+	off = atomic_load(&t->beat_offset);
+	moff = atomic_load(&mt->beat_offset);
+	mbeats = (deck_position(deck(from)) - moff) / mb;
+	beats = (at - off) / b;
+	/* same fraction of the bar, on the bar of @to nearest to @at */
+	want = floor(beats / BAR_BEATS) * BAR_BEATS + fmod(mbeats, BAR_BEATS);
+	if (want < 0.0)
+		want += BAR_BEATS;
+	if (want - beats > BAR_BEATS / 2.0)
+		want -= BAR_BEATS;
+	else if (beats - want > BAR_BEATS / 2.0)
+		want += BAR_BEATS;
+	return fmax(off + want * b, 0.0);
+}
+
+/*
  * Beat lock: while the blend runs, nudge the incoming deck so its beats
- * stay on the outgoing deck's, closing any drift within LOCK_SECS.
+ * stay on the outgoing deck's.  Proportional on the phase gap, closing
+ * it within LOCK_SECS, plus an integral part that cancels a steady
+ * drift from a beat grid that is a hair off.
  */
 static void beat_lock(int from, int to)
 {
 	struct deck *m = deck(from), *d = deck(to);
 	struct track *mt = deck_track(m), *t = deck_track(d);
-	double b, mb, phase, mphase, e, bend, bpm;
+	double b, mb, phase, mphase, e, bend, bpm, dt;
+	gint64 now = g_get_monotonic_time();
 
 	if (!mt || !t || !atomic_load(&m->playing) || !atomic_load(&d->playing))
 		goto off;
@@ -318,9 +370,28 @@ static void beat_lock(int from, int to)
 		e -= 1.0;
 	else if (e < -0.5)
 		e += 1.0;
-	if (fabs(e) < LOCK_DEAD)
+	dt = am.lock_time ? (now - am.lock_time) / 1e6 : 0.0;
+	am.lock_time = now;
+	am.lock_err = e;
+	/*
+	 * Right after the start the incoming deck is still inaudible: put
+	 * it exactly on the beat with a seek, which the nudge could only
+	 * approach.  Later on only the nudge is used, a seek would be
+	 * heard.
+	 */
+	if (am.snaps < 3 && fabs(e) > 0.002 &&
+	    (now - am.fade_start) / 1e6 < 1.0) {
+		deck_seek(d, deck_position(d) + e * b);
+		am.snaps++;
+		am.lock_int = 0.0;
+		g_debug("automix: snapped %c by %.4f beats", app_deck_letter(to),
+			e);
 		goto off;
-	bend = e * 60.0 / bpm / LOCK_SECS;
+	}
+	am.lock_int = CLAMP(am.lock_int + e * dt * LOCK_INT, -0.05, 0.05);
+	if (fabs(e) < LOCK_DEAD && fabs(am.lock_int) < LOCK_DEAD)
+		goto off;
+	bend = (e / LOCK_SECS + am.lock_int) * 60.0 / bpm;
 	atomic_store(&d->bend, (float)CLAMP(bend, -LOCK_MAX, LOCK_MAX));
 	return;
 off:
@@ -633,6 +704,31 @@ static void plan_transition(int from, int to)
 		am.plan_start = snap_grid(tt, am.plan_start >= 0.0 ?
 					  am.plan_start : deck(to)->cue);
 	am.plan_len = len;
+
+	/*
+	 * How the two sound where they meet.  A louder incoming stretch
+	 * is trimmed down to the outgoing level for the blend and comes
+	 * in on a slower curve; a quieter one is lifted and comes in
+	 * faster, so the level never jumps at the hand over.
+	 */
+	am.shape = 1.0;
+	am.level_db = 0.0;
+	if (track_done(tf) && track_done(tt)) {
+		double end = audible_end(from);
+		double start = am.plan_start >= 0.0 ? am.plan_start :
+			       deck(to)->cue;
+		double out = analyze_level(tf, (size_t)fmax(end - len *
+							     tf->rate, 0.0),
+					   (size_t)end);
+		double in = analyze_level(tt, (size_t)start,
+					  (size_t)(start + len * tt->rate));
+
+		if (out > 0.0 && in > 0.0) {
+			am.level_db = 20.0 * log10(in / out);
+			/* never hurry: the playing track always leaves slowly */
+			am.shape = CLAMP(1.0 + am.level_db / 12.0, 1.0, 1.8);
+		}
+	}
 }
 
 static void begin_fade(void)
@@ -658,13 +754,37 @@ static void begin_fade(void)
 	am.started = true;
 	am.app->by_hand[am.next] = FALSE;
 	blend_save();
+	am.trim.on = false;
+	am.trim_to = atomic_load(&to->trim_db);
+	if (fabs(am.level_db) > 1.0) {
+		/* level match for the blend: a trim, undone afterwards */
+		float trim = (float)CLAMP(am.trim_to - am.level_db, -12.0,
+					  6.0);
+
+		atomic_store(&to->trim_db, trim);
+		g_debug("automix: %c is %.1f dB against %c, trim %.1f dB",
+			app_deck_letter(am.next), am.level_db,
+			app_deck_letter(am.active), trim);
+	}
 	/* the incoming track enters without its lows, they come in later */
 	atomic_store(&to->eq_db[EQ_LOW], (float)LOW_CUT);
 	atomic_store(&to->eq_db[EQ_MID], (float)(am.eq_to[EQ_MID] + MID_IN));
-	start_deck(am.next, am.plan_start);
-	if (am.app->cfg.automix_sync) {
-		deck_sync_phase(to, from);
-		bar_align(am.next, am.active);
+	am.lock_int = 0.0;
+	am.lock_time = 0;
+	am.snaps = 0;
+	if (am.app->cfg.automix_sync && am.match &&
+	    !atomic_load(&to->playing)) {
+		double at = am.plan_start >= 0.0 ? am.plan_start : to->cue;
+
+		at += analyze_silence_head(deck_track(to), (size_t)at) *
+		      deck_track(to)->rate;
+		start_deck(am.next, aligned_start(am.next, am.active, at));
+	} else {
+		start_deck(am.next, am.plan_start);
+		if (am.app->cfg.automix_sync) {
+			deck_sync_phase(to, from);
+			bar_align(am.next, am.active);
+		}
 	}
 	pd_media_item_changed("*");
 
@@ -681,6 +801,9 @@ static void end_fade(void)
 {
 	deck_play(deck(am.active), false);
 	blend_restore();
+	if (fabs(atomic_load(&deck(am.next)->trim_db) - am.trim_to) > 0.1)
+		glide_to(&am.trim, am.next, &deck(am.next)->trim_db, am.trim_to,
+			 RETURN_SECS, "trim");
 	pd_media_item_changed("*");
 	am.app->by_hand[am.active] = FALSE;
 	am.active = am.next;
@@ -875,7 +998,9 @@ static void tick_fading(void)
 
 	if (t >= 1.0)
 		t = 1.0;
-	x = am.fade_from + (am.fade_to - am.fade_from) * ease(t);
+	/* a slow start brings a loud newcomer in gently, and vice versa */
+	x = am.fade_from + (am.fade_to - am.fade_from) *
+	    ease(pow(t, am.shape > 0.0 ? am.shape : 1.0));
 	atomic_store(&am.app->engine.xfader, (float)x);
 	blend_eq(t);
 	if (am.app->cfg.automix_sync && am.match) {
@@ -909,6 +1034,10 @@ static void tick_fading(void)
 		   app_deck_letter(am.active), app_deck_letter(am.next),
 		   (int)secs);
 	if ((int)(t * 10.0) != (int)((t - 0.02) * 10.0))
+		g_debug("automix: blend %.0f%%: lock err %.4f beats, int %.4f, "
+			"bend %.4f", t * 100.0, am.lock_err, am.lock_int,
+			atomic_load(&deck(am.next)->bend));
+	if (0)
 		g_debug("automix: blend %.0f%%: xf %.2f, %c low %.0f mid %.0f "
 			"filt %.2f pitch %.1f%%, %c low %.0f mid %.0f pitch "
 			"%.1f%%", t * 100.0, x, app_deck_letter(am.active),
@@ -928,6 +1057,7 @@ static gboolean tick(gpointer data)
 {
 	glide_tick(&am.prep);
 	glide_tick(&am.ret);
+	glide_tick(&am.trim);
 	switch (am.state) {
 	case AM_IDLE:
 		tick_idle();
@@ -975,6 +1105,7 @@ void automix_set_enabled(bool on)
 			blend_restore();	/* stopped mid blend */
 		am.prep.on = false;
 		am.ret.on = false;
+		am.trim.on = false;
 		am.state = AM_IDLE;
 		am.due_at = 0;
 		set_status("Automix is off");

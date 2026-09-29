@@ -30,6 +30,11 @@
     <binary>pengu-deck</binary>
   </provides>
   <releases>
+    <release version="0.1.4" date="2026-09-29">
+      <description>
+        <p>Automix reworked: blends start on a phrase, tempos meet halfway with a beat lock, bass and mids are handed over, levels matched, silence never played, and the queue is ordered by tempo and key. SoundCloud playlists, a Full tracks toggle and a login that survives restarts. The library pane resizes with the decks compacting, tracks drag onto the Automix tab.</p>
+      </description>
+    </release>
     <release version="0.1.3" date="2026-09-29">
       <description>
         <p>SoundCloud now uses the official API with OAuth 2.1 and PKCE: register an app, enter its credentials, and log in with your browser. WebKitGTK is no longer needed.</p>

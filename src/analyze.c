@@ -504,6 +504,22 @@ static double *seconds_profile(const struct track *t, size_t *n,
 	return e;
 }
 
+/* Mean peak level (0..1) of the frames @from..@to, 0 without bins. */
+double analyze_level(const struct track *t, size_t from, size_t to)
+{
+	size_t bins = track_bins(t), i, a = from / WAVE_BIN_FRAMES;
+	size_t b = to / WAVE_BIN_FRAMES;
+	double acc = 0.0;
+
+	if (b > bins)
+		b = bins;
+	if (a >= b)
+		return 0.0;
+	for (i = a; i < b; i++)
+		acc += track_bin(t, i)->peak;
+	return acc / (double)(b - a) / 255.0;
+}
+
 #define SILENCE_PEAK	2	/* of 255: about -42 dBFS */
 #define MAX_SILENCE_SECS 300.0
 
