@@ -197,6 +197,29 @@ static void test_deck_play(void)
 	engine_fini(&e);
 }
 
+static void test_seek_while_loading(void)
+{
+	struct engine e;
+	struct track *t = track_new("mem", "mem", RATE);
+
+	engine_init(&e);
+	deck_set_rate(&e.deck[0], RATE);
+	deck_set_rate(&e.deck[1], RATE);
+	atomic_store(&t->length_hint, (size_t)RATE * 60);
+	deck_load(&e.deck[0], t);
+	track_unref(t);
+
+	/* Nothing decoded yet: a restored cue point must survive. */
+	deck_seek(&e.deck[0], 30.0 * RATE);
+	g_assert_cmpfloat(deck_position(&e.deck[0]), ==, 30.0 * RATE);
+
+	/* Once decoding is done, seeks clamp to the real length. */
+	atomic_store(&t->state, TRACK_DECODED);
+	deck_seek(&e.deck[0], 30.0 * RATE);
+	g_assert_cmpfloat(deck_position(&e.deck[0]), ==, 0.0);
+	engine_fini(&e);
+}
+
 static void test_sync(void)
 {
 	struct engine e;
@@ -337,6 +360,7 @@ int main(int argc, char **argv)
 	g_test_add_func("/analyze/fold", test_bpm_fold);
 	g_test_add_func("/dsp/biquad", test_biquad);
 	g_test_add_func("/deck/play", test_deck_play);
+	g_test_add_func("/deck/seek-loading", test_seek_while_loading);
 	g_test_add_func("/deck/sync", test_sync);
 	g_test_add_func("/decoder/wav", test_decoder);
 	g_test_add_func("/soundcloud/parse", test_sc_parse);

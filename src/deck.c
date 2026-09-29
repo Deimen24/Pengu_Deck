@@ -494,7 +494,8 @@ void deck_seek(struct deck *d, double frame)
 	if (!t)
 		return;
 	len = (double)track_length(t);
-	if (frame > len)
+	/* While loading the length is only a hint, let the seek through. */
+	if (track_done(t) && frame > len)
 		frame = len;
 	if (frame < 0.0)
 		frame = 0.0;

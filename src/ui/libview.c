@@ -22,13 +22,17 @@ static void scan_done(GObject *src, GAsyncResult *res, gpointer data)
 	GError *err = NULL;
 	GPtrArray *items = library_scan_finish(res, &err);
 
+	/* A cancelled scan may outlive the widgets, touch nothing. */
+	if (g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED)) {
+		g_clear_error(&err);
+		g_object_unref(v);
+		return;
+	}
 	gtk_widget_set_visible(v->spinner, FALSE);
 	gtk_widget_set_sensitive(v->rescan, TRUE);
 	g_clear_object(&v->cancel);
 	if (!items) {
-		if (!g_error_matches(err, G_IO_ERROR, G_IO_ERROR_CANCELLED))
-			app_toast(v->app, "Library scan failed: %s",
-				  err->message);
+		app_toast(v->app, "Library scan failed: %s", err->message);
 		g_clear_error(&err);
 		g_object_unref(v);
 		return;
@@ -99,8 +103,10 @@ static void pd_lib_view_dispose(GObject *obj)
 {
 	PdLibView *v = PD_LIB_VIEW(obj);
 
-	if (v->cancel)
+	if (v->cancel) {
 		g_cancellable_cancel(v->cancel);
+		g_clear_object(&v->cancel);
+	}
 	G_OBJECT_CLASS(pd_lib_view_parent_class)->dispose(obj);
 }
 

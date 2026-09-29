@@ -34,6 +34,7 @@ struct _PdDeckView {
 	guint tick;
 	struct track *saved_for;	/* track whose analysis was saved */
 	gboolean updating;
+	gboolean shown_playing;
 };
 
 G_DEFINE_FINAL_TYPE(PdDeckView, pd_deck_view, GTK_TYPE_BOX)
@@ -139,7 +140,14 @@ static gboolean tick(GtkWidget *w, GdkFrameClock *clock, gpointer data)
 	    playing)
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(v->play),
 					     playing);
-	gtk_button_set_label(GTK_BUTTON(v->play), playing ? "⏸" : "▶");
+	if (playing != v->shown_playing) {
+		v->shown_playing = playing;
+		gtk_button_set_label(GTK_BUTTON(v->play), playing ? "⏸" : "▶");
+	}
+	if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(v->keylock)) !=
+	    atomic_load(&v->deck->keylock))
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(v->keylock),
+					     atomic_load(&v->deck->keylock));
 	if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(v->loop)) !=
 	    atomic_load(&v->deck->loop_on))
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(v->loop),
@@ -216,20 +224,21 @@ static void on_sync(GtkButton *b, PdDeckView *v)
 			  "pitch range", p * 100.0, v->app->cfg.pitch_range);
 		return;
 	}
-	atomic_store(&v->deck->pitch, (float)p);
-	gtk_range_set_value(GTK_RANGE(v->pitch), -p * 100.0);
+	gtk_range_set_value(GTK_RANGE(v->pitch), p * 100.0);
 	deck_sync_phase(v->deck, master);
 }
 
 static void on_keylock(GtkToggleButton *b, PdDeckView *v)
 {
-	atomic_store(&v->deck->keylock, gtk_toggle_button_get_active(b));
+	if (!v->updating)
+		atomic_store(&v->deck->keylock,
+			     gtk_toggle_button_get_active(b));
 }
 
 static void on_pitch(GtkRange *r, PdDeckView *v)
 {
-	/* Fader is inverted: up = slower, like on a CDJ. */
-	atomic_store(&v->deck->pitch, (float)(-gtk_range_get_value(r) / 100.0));
+	/* Vertical scales put the minimum at the top: up = slower. */
+	atomic_store(&v->deck->pitch, (float)(gtk_range_get_value(r) / 100.0));
 }
 
 static void on_pitch_reset(GtkButton *b, PdDeckView *v)

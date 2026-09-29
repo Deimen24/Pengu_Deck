@@ -12,7 +12,7 @@
 
 #define API		"https://api-v2.soundcloud.com"
 #define PAGE_LIMIT	50
-#define MAX_TRACKS	500
+#define MAX_TRACKS	200
 #define IDS_PER_CALL	50
 
 G_DEFINE_QUARK(pd-soundcloud-error-quark, sc_error)
@@ -444,7 +444,7 @@ char *sc_stream_url(const struct sc_auth *a, PdMediaItem *m, GError **err)
 
 static char *find_client_id(const char *js)
 {
-	GRegex *re = g_regex_new("client_id\\s*[:=]\\s*\"([0-9a-zA-Z]{32})\"",
+	GRegex *re = g_regex_new("client_id\\s*[:=]\\s*\"?([0-9a-zA-Z]{32})",
 				 0, 0, NULL);
 	GMatchInfo *mi = NULL;
 	char *id = NULL;

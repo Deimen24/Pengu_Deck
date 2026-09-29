@@ -187,7 +187,10 @@ static void output_block(struct engine *e, float *out, unsigned int n)
 	for (i = 0; i < n; i++) {
 		float *o = out + i * ch;
 		float ml = p->mix[2 * i], mr = p->mix[2 * i + 1];
+		unsigned int c;
 
+		for (c = 2; c < ch; c++)
+			o[c] = 0.0f;
 		switch (e->hp_mode) {
 		case HP_SPLIT:
 			o[0] = 0.5f * (ml + mr);
@@ -371,11 +374,14 @@ int engine_open(struct engine *e, const struct engine_opts *o, char **err)
 		goto fail;
 	}
 	e->running = true;
-	if (o->hp_mode == HP_CH34 && p->dev.playback.internalChannels < 4)
+	if (o->hp_mode == HP_CH34 && p->dev.playback.internalChannels < 4) {
+		/* Never let the cue bus get downmixed into the master. */
+		e->hp_mode = HP_OFF;
 		*err = g_strdup_printf("The output device has only %u "
 				       "channels, headphone cue on channels "
 				       "3/4 is not available",
 				       p->dev.playback.internalChannels);
+	}
 	return 0;
 
 fail:

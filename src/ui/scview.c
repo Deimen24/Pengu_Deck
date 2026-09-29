@@ -124,11 +124,6 @@ static void on_likes(GtkButton *b, PdScView *v)
 	run_query(v, QUERY_LIKES, NULL);
 }
 
-static void on_filter(GtkEditable *e, PdScView *v)
-{
-	pd_media_view_set_filter(v->media, gtk_editable_get_text(e));
-}
-
 static void pd_sc_view_class_init(PdScViewClass *klass)
 {
 }
@@ -181,7 +176,6 @@ GtkWidget *pd_sc_view_new(struct app *app)
 	filter = pd_media_view_search_entry(v->media);
 	gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(filter),
 					      "Filter results");
-	g_signal_connect(filter, "changed", G_CALLBACK(on_filter), v);
 	gtk_box_append(GTK_BOX(v), filter);
 	gtk_box_append(GTK_BOX(v), media);
 	return GTK_WIDGET(v);

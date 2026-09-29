@@ -116,6 +116,7 @@ static void load_uri(struct app *a, int idx, const char *uri,
 	t = track_new(uri, key, rate);
 	track_set_meta(t, title, artist);
 	deck_load(d, t);
+	atomic_store(&d->keylock, a->cfg.keylock && deck_has_keylock());
 	restore_cues(d, t);
 	if (!atomic_load(&t->analysed) && tag_bpm > 0.0) {
 		/* Keep the tag tempo, still analyse to find the grid. */
