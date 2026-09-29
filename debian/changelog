@@ -1,3 +1,11 @@
+pengu-deck (0.1.3-1) unstable; urgency=medium
+
+  * SoundCloud through the official API with OAuth 2.1 and PKCE.
+  * Login in the system browser, WebKitGTK no longer needed.
+  * Window buttons drawn by the app, --version prints the commit.
+
+ -- deimen24 <da.husmann24@gmail.com>  Tue, 29 Sep 2026 18:00:00 +0000
+
 pengu-deck (0.1.2-1) unstable; urgency=medium
 
   * Keep the session awake while playing, recording or streaming.

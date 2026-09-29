@@ -3,11 +3,13 @@
  * main.c - application entry point
  */
 #include <locale.h>
+#include <stdio.h>
 
 #include "app.h"
 #include "automix.h"
 #include "midi.h"
 #include "pd-build.h"
+#include "pd-vcs.h"
 #include "ui/window.h"
 
 static struct app app;
@@ -108,6 +110,11 @@ int main(int argc, char **argv)
 	int ret;
 
 	setlocale(LC_ALL, "");
+	if (argc > 1 && (g_str_equal(argv[1], "--version") ||
+			 g_str_equal(argv[1], "-v"))) {
+		printf("Pengu Deck %s (%s)\n", PD_VERSION, PD_COMMIT);
+		return 0;
+	}
 	gtk = gtk_application_new(PD_APP_ID, G_APPLICATION_HANDLES_OPEN);
 	g_signal_connect(gtk, "startup", G_CALLBACK(on_startup), NULL);
 	g_signal_connect(gtk, "activate", G_CALLBACK(on_activate), NULL);

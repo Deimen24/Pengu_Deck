@@ -1,0 +1,5 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later */
+#ifndef PD_VCS_H
+#define PD_VCS_H
+#define PD_COMMIT "@VCS_TAG@"
+#endif

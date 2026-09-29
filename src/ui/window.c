@@ -6,6 +6,7 @@
 #include "libview.h"
 #include "mixerview.h"
 #include "pd-build.h"
+#include "pd-vcs.h"
 #include "playlists.h"
 #include "prefs.h"
 #include "queueview.h"
@@ -288,10 +289,11 @@ static void on_about(GSimpleAction *a, GVariant *p, gpointer data)
 {
 	PdWindow *w = data;
 	const char *authors[] = { "Pengu Deck contributors", NULL };
+	char *version = g_strdup_printf("%s (%s)", PD_VERSION, PD_COMMIT);
 
 	gtk_show_about_dialog(GTK_WINDOW(w),
 			      "program-name", "Pengu Deck",
-			      "version", PD_VERSION,
+			      "version", version,
 			      "comments", "Two deck DJ software for Linux "
 					  "with local files and SoundCloud",
 			      "license-type", GTK_LICENSE_GPL_3_0,

@@ -1,5 +1,5 @@
 project('pengu-deck', 'c',
-	version: '0.1.2',
+	version: '0.1.3',
 	license: 'GPL-3.0-or-later',
 	meson_version: '>= 0.62.0',
 	default_options: [
@@ -41,6 +41,9 @@ conf.set_quoted('PD_APP_ID', 'io.github.deimen24.PenguDeck')
 conf.set('HAVE_RUBBERBAND', rubberband_dep.found())
 conf.set('HAVE_ALSA', alsa_dep.found())
 configure_file(output: 'pd-build.h', configuration: conf)
+# the commit the binary was built from, so a stale install is obvious
+vcs_h = vcs_tag(input: 'src/pd-vcs.h.in', output: 'pd-vcs.h',
+	command: ['git', 'rev-parse', '--short', 'HEAD'], fallback: 'unknown')
 
 miniaudio_inc = include_directories('third_party/miniaudio')
 
@@ -70,7 +73,7 @@ core_deps = [
 	avformat_dep, avcodec_dep, avutil_dep, swr_dep, rubberband_dep,
 ]
 
-core_lib = static_library('pdcore', core_src,
+core_lib = static_library('pdcore', [core_src, vcs_h],
 	dependencies: core_deps,
 	include_directories: miniaudio_inc,
 	# miniaudio is third party code, keep its warnings out of our way
@@ -109,7 +112,7 @@ ui_src = files(
 	'src/ui/window.c',
 )
 
-executable('pengu-deck', ui_src, resources,
+executable('pengu-deck', [ui_src, vcs_h], resources,
 	dependencies: [core_dep, gtk_dep, alsa_dep],
 	install: true)
 

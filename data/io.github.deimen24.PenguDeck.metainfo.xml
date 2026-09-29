@@ -30,6 +30,11 @@
     <binary>pengu-deck</binary>
   </provides>
   <releases>
+    <release version="0.1.3" date="2026-09-29">
+      <description>
+        <p>SoundCloud now uses the official API with OAuth 2.1 and PKCE: register an app, enter its credentials, and log in with your browser. WebKitGTK is no longer needed.</p>
+      </description>
+    </release>
     <release version="0.1.2" date="2026-09-29">
       <description>
         <p>Keeps the session awake while playing, recording or streaming, lower CPU use through a waveform render cache, automix holds while a deck is paused, Escape closes dialogs, and a fix for a crash when the recording folder cannot be created.</p>
