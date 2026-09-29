@@ -4,6 +4,8 @@
  */
 #include <stdarg.h>
 
+#define G_LOG_DOMAIN "pengu-deck"
+
 #include "app.h"
 #include "cuestore.h"
 #include "decoder.h"
@@ -312,6 +314,8 @@ static gpointer sc_load_thread(gpointer data)
 {
 	struct sc_load *l = data;
 	l->url = sc_stream_url(l->item, &l->err);
+	g_debug("stream for %s: %s", l->item->key, l->url ? l->url :
+		l->err ? l->err->message : "?");
 	g_idle_add(sc_load_done, l);
 	return NULL;
 }

@@ -2,6 +2,8 @@
 /*
  * net.c - minimal libcurl wrapper
  */
+#define G_LOG_DOMAIN "pengu-deck"
+
 #include <curl/curl.h>
 
 #include "net.h"
@@ -83,6 +85,12 @@ static char *request(const char *url, const char *form, const char *auth,
 	rc = curl_easy_perform(c);
 	curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
 	curl_easy_cleanup(c);
+	/* G_MESSAGES_DEBUG=pengu-deck shows every request and its answer */
+	g_debug("%s %s -> %ld%s%s", form ? "POST" : "GET", url, code,
+		rc != CURLE_OK ? " " : "",
+		rc != CURLE_OK ? curl_easy_strerror(rc) : "");
+	if (code >= 400 && body->len > 0 && body->len < 400)
+		g_debug("  reply: %s", body->str);
 	curl_slist_free_all(hdr);
 	g_free(line);
 
