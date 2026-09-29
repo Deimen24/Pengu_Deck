@@ -426,6 +426,57 @@ static void on_open(GSimpleAction *a, GVariant *p, gpointer data)
 
 /* ---- construction ------------------------------------------------ */
 
+/* ---- window buttons ---------------------------------------------- */
+
+static void on_minimize(GtkButton *b, PdWindow *w)
+{
+	gtk_window_minimize(GTK_WINDOW(w));
+}
+
+static void on_maximize(GtkButton *b, PdWindow *w)
+{
+	if (gtk_window_is_maximized(GTK_WINDOW(w)))
+		gtk_window_unmaximize(GTK_WINDOW(w));
+	else
+		gtk_window_maximize(GTK_WINDOW(w));
+}
+
+static void on_close(GtkButton *b, PdWindow *w)
+{
+	gtk_window_close(GTK_WINDOW(w));
+}
+
+static GtkWidget *window_button(const char *glyph, const char *tip,
+				GCallback cb, PdWindow *w)
+{
+	GtkWidget *b = gtk_button_new_with_label(glyph);
+
+	gtk_widget_add_css_class(b, "window-button");
+	gtk_widget_set_focusable(b, FALSE);
+	gtk_widget_set_valign(b, GTK_ALIGN_CENTER);
+	gtk_widget_set_tooltip_text(b, tip);
+	g_signal_connect(b, "clicked", cb, w);
+	return b;
+}
+
+/*
+ * The window buttons are drawn by the app, with text glyphs, so they
+ * look the same on every desktop and need no icon theme.
+ */
+static GtkWidget *window_buttons(PdWindow *w)
+{
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+
+	gtk_box_append(GTK_BOX(box), window_button("\u2013", "Minimize",
+						   G_CALLBACK(on_minimize), w));
+	gtk_box_append(GTK_BOX(box), window_button("\u25a1", "Maximize",
+						   G_CALLBACK(on_maximize), w));
+	gtk_box_append(GTK_BOX(box), window_button("\u2715", "Close",
+						   G_CALLBACK(on_close), w));
+	gtk_widget_add_css_class(box, "window-buttons");
+	return box;
+}
+
 static GtkWidget *build_header(PdWindow *w)
 {
 	GtkWidget *hb = gtk_header_bar_new();
@@ -441,6 +492,8 @@ static GtkWidget *build_header(PdWindow *w)
 	gtk_box_append(GTK_BOX(brand), logo);
 	gtk_box_append(GTK_BOX(brand), title);
 	gtk_header_bar_set_title_widget(GTK_HEADER_BAR(hb), brand);
+	gtk_header_bar_set_show_title_buttons(GTK_HEADER_BAR(hb), FALSE);
+	gtk_header_bar_pack_end(GTK_HEADER_BAR(hb), window_buttons(w));
 	g_menu_append(menu, "Open file…", "win.open");
 	g_menu_append(menu, "Import Rekordbox XML…", "win.import-rekordbox");
 	g_menu_append(menu, "Preferences", "win.prefs");

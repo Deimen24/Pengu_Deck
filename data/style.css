@@ -51,6 +51,33 @@ headerbar button {
 	padding: 2px 8px;
 }
 
+.window-buttons {
+	margin-left: 6px;
+}
+
+button.window-button {
+	min-width: 26px;
+	min-height: 26px;
+	padding: 0;
+	border-radius: 6px;
+	background: transparent;
+	border: 1px solid transparent;
+	box-shadow: none;
+	color: @dim;
+	font-weight: 400;
+	font-size: 15px;
+}
+
+button.window-button:hover {
+	background: @raised;
+	color: @fg;
+}
+
+.window-buttons button.window-button:last-child:hover {
+	background: @rec;
+	color: #fff;
+}
+
 button.deck-count {
 	min-width: 26px;
 	padding: 2px 8px;

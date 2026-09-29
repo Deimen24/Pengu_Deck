@@ -51,6 +51,67 @@ static WebKitNetworkSession *session(void)
 	return s;
 }
 
+/*
+ * SoundCloud's bot check refuses WebKit's stock identity; present the
+ * view as a current mainstream browser so the page behaves as it does
+ * in one.
+ */
+#define USER_AGENT \
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " \
+	"(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+
+static WebKitSettings *view_settings(void)
+{
+	static WebKitSettings *s;
+
+	if (s)
+		return s;
+	s = webkit_settings_new();
+	webkit_settings_set_user_agent(s, USER_AGENT);
+	webkit_settings_set_enable_javascript(s, TRUE);
+	webkit_settings_set_javascript_can_open_windows_automatically(s,
+								     TRUE);
+	webkit_settings_set_enable_developer_extras(s, FALSE);
+	return s;
+}
+
+static void on_reload(GtkButton *b, struct login *l)
+{
+	webkit_web_view_load_uri(l->view, SIGNIN_URL);
+}
+
+static void on_open_browser(GtkButton *b, struct login *l)
+{
+	GtkUriLauncher *u = gtk_uri_launcher_new(SIGNIN_URL);
+
+	gtk_uri_launcher_launch(u, l->win, NULL, NULL, NULL);
+	g_object_unref(u);
+	gtk_label_set_text(GTK_LABEL(l->status),
+			   "Signed in in your browser? Copy the oauth_token "
+			   "cookie from soundcloud.com into Preferences → "
+			   "SoundCloud.");
+}
+
+/* When the embedded page misbehaves: retry, or use the system browser. */
+static GtkWidget *fallback_row(struct login *l)
+{
+	GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	GtkWidget *b;
+
+	gtk_widget_set_margin_top(row, 6);
+	gtk_widget_set_margin_bottom(row, 6);
+	gtk_widget_set_margin_start(row, 6);
+	gtk_widget_set_margin_end(row, 6);
+	b = gtk_button_new_with_label("Reload");
+	g_signal_connect(b, "clicked", G_CALLBACK(on_reload), l);
+	gtk_box_append(GTK_BOX(row), b);
+	b = gtk_button_new_with_label("Open in browser instead");
+	gtk_widget_set_hexpand(b, TRUE);
+	g_signal_connect(b, "clicked", G_CALLBACK(on_open_browser), l);
+	gtk_box_append(GTK_BOX(row), b);
+	return row;
+}
+
 struct detect {
 	struct login *l;
 	char *id;
@@ -165,11 +226,12 @@ void sclogin_show(struct app *a, void (*done)(gpointer data), gpointer data)
 	gtk_box_append(GTK_BOX(box), l->status);
 
 	view = g_object_new(WEBKIT_TYPE_WEB_VIEW, "network-session", session(),
-			    NULL);
+			    "settings", view_settings(), NULL);
 	l->view = WEBKIT_WEB_VIEW(view);
 	gtk_widget_set_vexpand(view, TRUE);
 	webkit_web_view_load_uri(l->view, SIGNIN_URL);
 	gtk_box_append(GTK_BOX(box), view);
+	gtk_box_append(GTK_BOX(box), fallback_row(l));
 	gtk_window_set_child(l->win, box);
 
 	l->poll = g_timeout_add(POLL_MS, poll, l);
