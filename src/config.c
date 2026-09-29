@@ -96,9 +96,13 @@ void config_load(struct config *c)
 	c->sc_client_id = get_str(kf, "soundcloud", "client_id");
 	c->sc_token = get_str(kf, "soundcloud", "oauth_token");
 
+	c->ndecks = get_int(kf, "decks", "count", 2);
 	c->pitch_range = get_int(kf, "decks", "pitch_range", 8);
 	c->keylock = get_int(kf, "decks", "keylock", 0);
 	c->quantize = get_int(kf, "decks", "quantize", 1);
+
+	c->automix_fade = CLAMP(get_int(kf, "automix", "fade", 12), 2, 90);
+	c->automix_sync = get_int(kf, "automix", "sync", 1);
 
 	if (c->backend < BACKEND_AUTO || c->backend > BACKEND_NULL)
 		c->backend = BACKEND_AUTO;
@@ -106,6 +110,7 @@ void config_load(struct config *c)
 		c->hp_mode = HP_OFF;
 	if (c->pitch_range != 16 && c->pitch_range != 50)
 		c->pitch_range = 8;
+	c->ndecks = CLAMP(c->ndecks, 2, ENGINE_DECKS);
 
 	g_free(path);
 	g_key_file_free(kf);
@@ -136,9 +141,13 @@ void config_save(const struct config *c)
 	g_key_file_set_string(kf, "soundcloud", "oauth_token",
 			      c->sc_token ? c->sc_token : "");
 
+	g_key_file_set_integer(kf, "decks", "count", c->ndecks);
 	g_key_file_set_integer(kf, "decks", "pitch_range", c->pitch_range);
 	g_key_file_set_integer(kf, "decks", "keylock", c->keylock);
 	g_key_file_set_integer(kf, "decks", "quantize", c->quantize);
+
+	g_key_file_set_integer(kf, "automix", "fade", c->automix_fade);
+	g_key_file_set_integer(kf, "automix", "sync", c->automix_sync);
 
 	g_mkdir_with_parents(dir, 0700);
 	if (!g_key_file_save_to_file(kf, path, &err)) {

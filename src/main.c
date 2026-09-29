@@ -5,6 +5,8 @@
 #include <locale.h>
 
 #include "app.h"
+#include "automix.h"
+#include "midi.h"
 #include "pd-build.h"
 #include "ui/window.h"
 
@@ -64,20 +66,26 @@ static void on_open(GtkApplication *gtk, GFile **files, int n,
 static void on_startup(GtkApplication *gtk, gpointer data)
 {
 	const char *quit_accels[] = { "<Control>q", NULL };
+	const char *prefs_accels[] = { "<Control>comma", NULL };
 	GSimpleAction *quit = g_simple_action_new("quit", NULL);
 
 	g_signal_connect_swapped(quit, "activate",
 				 G_CALLBACK(g_application_quit), gtk);
 	g_action_map_add_action(G_ACTION_MAP(gtk), G_ACTION(quit));
 	gtk_application_set_accels_for_action(gtk, "app.quit", quit_accels);
+	gtk_application_set_accels_for_action(gtk, "win.prefs", prefs_accels);
 	g_object_unref(quit);
 
 	g_set_prgname("pengu-deck");
 	app_init(&app, gtk);
+	automix_init(&app);
+	midi_init(&app);
 }
 
 static void on_shutdown(GtkApplication *gtk, gpointer data)
 {
+	midi_shutdown();
+	automix_shutdown();
 	app_shutdown(&app);
 }
 

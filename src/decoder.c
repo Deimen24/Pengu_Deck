@@ -33,9 +33,9 @@ struct decode_ctx {
 
 static int interrupt_cb(void *opaque)
 {
-	struct track *t = opaque;
+	atomic_bool *cancel = opaque;
 
-	return atomic_load(&t->cancel);
+	return atomic_load(cancel);
 }
 
 static const char *dict_value(AVDictionary *d, const char *key)
@@ -55,7 +55,8 @@ static const char *tag(AVFormatContext *fmt, int stream, const char *key)
 	return v;
 }
 
-static int open_input(AVFormatContext **fmt, const char *uri, void *opaque)
+int decoder_open_input(AVFormatContext **fmt, const char *uri,
+		       atomic_bool *cancel)
 {
 	AVDictionary *opts = NULL;
 	int ret;
@@ -63,9 +64,9 @@ static int open_input(AVFormatContext **fmt, const char *uri, void *opaque)
 	*fmt = avformat_alloc_context();
 	if (!*fmt)
 		return AVERROR(ENOMEM);
-	if (opaque) {
+	if (cancel) {
 		(*fmt)->interrupt_callback.callback = interrupt_cb;
-		(*fmt)->interrupt_callback.opaque = opaque;
+		(*fmt)->interrupt_callback.opaque = cancel;
 	}
 	if (strstr(uri, "://")) {
 		av_dict_set(&opts, "user_agent", USER_AGENT, 0);
@@ -87,7 +88,7 @@ static int setup(struct decode_ctx *c)
 	char *title;
 	int ret;
 
-	ret = open_input(&c->fmt, t->uri, t);
+	ret = decoder_open_input(&c->fmt, t->uri, &t->cancel);
 	if (ret < 0)
 		return ret;
 	ret = avformat_find_stream_info(c->fmt, NULL);
@@ -295,7 +296,7 @@ int decoder_probe(const char *path, struct media_tags *tags)
 	int stream;
 
 	memset(tags, 0, sizeof(*tags));
-	if (open_input(&fmt, path, NULL) < 0) {
+	if (decoder_open_input(&fmt, path, NULL) < 0) {
 		avformat_free_context(fmt);
 		return -1;
 	}

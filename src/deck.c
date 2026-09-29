@@ -48,6 +48,8 @@ void deck_init(struct deck *d, int index)
 	d->index = index;
 	atomic_init(&d->seek, DECK_NO_SEEK);
 	atomic_init(&d->volume, 1.0f);
+	/* A and C on the left of the crossfader, B and D on the right. */
+	atomic_init(&d->xf_side, index % 2 ? XF_RIGHT : XF_LEFT);
 	d->loop_beats = 4.0;
 	for (i = 0; i < DECK_HOTCUES; i++)
 		d->hotcue[i] = -1.0;
@@ -434,6 +436,10 @@ void deck_render(struct deck *d, float *out, unsigned int n)
 {
 	struct track *t;
 
+	if (!d->out_rate) {
+		memset(out, 0, n * 2 * sizeof(float));
+		return;
+	}
 	atomic_store(&d->in_use, 1);
 	t = atomic_load(&d->track);
 	if (t && track_frames(t) > 0) {

@@ -4,7 +4,9 @@
  */
 #include <string.h>
 
+#include "midi.h"
 #include "prefs.h"
+#include "sccache.h"
 
 struct prefs {
 	struct app *app;
@@ -25,12 +27,24 @@ struct prefs {
 	GtkWidget *client_id;
 	GtkWidget *token;
 	GtkWidget *detect;
+	GtkWidget *cache_label;
 	GtkWidget *status;
+	GtkWidget *midi_status;
+	GtkWidget *midi_grid;
+	GtkWidget *midi_labels[128];
+	guint midi_timer;
 };
+
+static void on_clear_cache(GtkButton *b, struct prefs *p)
+{
+	sccache_clear();
+	gtk_label_set_text(GTK_LABEL(p->cache_label),
+			   "0 bytes of cached streams");
+}
 
 static const char *const backend_names[] = {
 	"Automatic", "PulseAudio / PipeWire", "ALSA", "JACK / PipeWire-JACK",
-	NULL,
+	"Silent (no output, for testing)", NULL,
 };
 static const char *const hp_names[] = {
 	"Off", "Split stereo: left = master, right = cue",
@@ -367,6 +381,11 @@ static gboolean free_prefs(gpointer data)
 static void on_destroy(GtkWidget *w, struct prefs *p)
 {
 	p->win = NULL;
+	midi_learn(NULL);
+	if (p->midi_timer) {
+		g_source_remove(p->midi_timer);
+		p->midi_timer = 0;
+	}
 	/* Keep the struct alive for a detect thread still in flight. */
 	g_timeout_add_seconds(120, free_prefs, p);
 }
@@ -470,6 +489,26 @@ static void build_soundcloud(struct prefs *p, GtkWidget *nb)
 			      c->sc_token ? c->sc_token : "");
 	row(g, 1, "OAuth token", p->token);
 
+	{
+		GtkWidget *cbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+		GtkWidget *b = gtk_button_new_with_label("Clear cache");
+		char *size = g_format_size(sccache_size());
+		char *txt = g_strdup_printf("%s of cached streams in "
+					    "~/.cache/pengu-deck/soundcloud",
+					    size);
+
+		p->cache_label = gtk_label_new(txt);
+		gtk_widget_add_css_class(p->cache_label, "dim-label");
+		gtk_widget_set_hexpand(p->cache_label, TRUE);
+		gtk_label_set_xalign(GTK_LABEL(p->cache_label), 0.0f);
+		g_signal_connect(b, "clicked", G_CALLBACK(on_clear_cache), p);
+		gtk_box_append(GTK_BOX(cbox), p->cache_label);
+		gtk_box_append(GTK_BOX(cbox), b);
+		row(g, 2, "Cache", cbox);
+		g_free(txt);
+		g_free(size);
+	}
+
 	l = gtk_label_new(
 		"Search and public links only need the client ID. Press "
 		"Detect to fetch the one the soundcloud.com player uses; it "
@@ -480,13 +519,142 @@ static void build_soundcloud(struct prefs *p, GtkWidget *nb)
 		"the \"oauth_token\" cookie (or the Authorization header of "
 		"any api-v2 request) here. The token is stored in "
 		"~/.config/pengu-deck/settings.ini with mode 0600.\n\n"
-		"Streams come from SoundCloud's transcoding endpoints and "
-		"are decoded on the fly; only what you play is downloaded, "
-		"and nothing is saved to disk.");
+		"Tracks you load or queue are downloaded into the cache in "
+		"the background and play from disk from then on.");
 	gtk_label_set_wrap(GTK_LABEL(l), TRUE);
 	gtk_label_set_xalign(GTK_LABEL(l), 0.0f);
 	gtk_widget_add_css_class(l, "dim-label");
-	gtk_grid_attach(GTK_GRID(g), l, 0, 2, 2, 1);
+	gtk_grid_attach(GTK_GRID(g), l, 0, 3, 2, 1);
+}
+
+/* ---- midi -------------------------------------------------------- */
+
+static void refresh_midi_row(struct prefs *p, unsigned int i)
+{
+	unsigned int n;
+	const struct midi_control *c = midi_controls(&n);
+	char *b = midi_binding(c[i].name);
+
+	gtk_label_set_text(GTK_LABEL(p->midi_labels[i]), b ? b : "–");
+	if (b)
+		gtk_widget_remove_css_class(p->midi_labels[i], "dim-label");
+	else
+		gtk_widget_add_css_class(p->midi_labels[i], "dim-label");
+	g_free(b);
+}
+
+static void refresh_midi(struct prefs *p)
+{
+	unsigned int n, i;
+	char **devs = midi_devices();
+	char *joined = g_strjoinv(", ", devs);
+	char *txt;
+
+	midi_controls(&n);
+	for (i = 0; i < n && i < G_N_ELEMENTS(p->midi_labels); i++)
+		refresh_midi_row(p, i);
+	if (!midi_available())
+		txt = g_strdup("The ALSA sequencer is not available");
+	else if (!*joined)
+		txt = g_strdup("No MIDI device connected. Plug a controller "
+			       "in; it is picked up automatically.");
+	else
+		txt = g_strdup_printf("Connected: %s\nLast message: %s",
+				      joined, midi_last_message());
+	gtk_label_set_text(GTK_LABEL(p->midi_status), txt);
+	g_free(txt);
+	g_free(joined);
+	g_strfreev(devs);
+}
+
+static gboolean midi_tick(gpointer data)
+{
+	struct prefs *p = data;
+
+	if (!p->win) {
+		p->midi_timer = 0;
+		return G_SOURCE_REMOVE;
+	}
+	refresh_midi(p);
+	return G_SOURCE_CONTINUE;
+}
+
+static void on_learn(GtkButton *b, struct prefs *p)
+{
+	const char *name = g_object_get_data(G_OBJECT(b), "control");
+
+	if (midi_learning()) {
+		midi_learn(NULL);
+		set_status(p, "Learn cancelled", FALSE);
+		return;
+	}
+	midi_learn(name);
+	set_status(p, "Move or press the control on your device…", FALSE);
+}
+
+static void on_unlearn(GtkButton *b, struct prefs *p)
+{
+	midi_unbind(g_object_get_data(G_OBJECT(b), "control"));
+	refresh_midi(p);
+}
+
+static void build_midi(struct prefs *p, GtkWidget *nb)
+{
+	GtkWidget *g = page(nb, "MIDI");
+	GtkWidget *scroll, *grid, *l, *b;
+	unsigned int n, i;
+	const struct midi_control *c = midi_controls(&n);
+
+	p->midi_status = gtk_label_new("");
+	gtk_label_set_wrap(GTK_LABEL(p->midi_status), TRUE);
+	gtk_label_set_xalign(GTK_LABEL(p->midi_status), 0.0f);
+	gtk_grid_attach(GTK_GRID(g), p->midi_status, 0, 0, 2, 1);
+
+	l = gtk_label_new("Press Learn next to a function, then move the "
+			  "knob or press the button on your controller. "
+			  "Pioneer DDJ controllers and CDJs in MIDI mode work "
+			  "without any driver. The mapping is stored in "
+			  "~/.config/pengu-deck/midi.ini.");
+	gtk_label_set_wrap(GTK_LABEL(l), TRUE);
+	gtk_label_set_xalign(GTK_LABEL(l), 0.0f);
+	gtk_widget_add_css_class(l, "dim-label");
+	gtk_grid_attach(GTK_GRID(g), l, 0, 1, 2, 1);
+
+	grid = gtk_grid_new();
+	gtk_grid_set_row_spacing(GTK_GRID(grid), 2);
+	gtk_grid_set_column_spacing(GTK_GRID(grid), 12);
+	for (i = 0; i < n && i < G_N_ELEMENTS(p->midi_labels); i++) {
+		l = gtk_label_new(c[i].label);
+		gtk_label_set_xalign(GTK_LABEL(l), 0.0f);
+		gtk_widget_set_hexpand(l, TRUE);
+		gtk_grid_attach(GTK_GRID(grid), l, 0, (int)i, 1, 1);
+		p->midi_labels[i] = gtk_label_new("");
+		gtk_label_set_xalign(GTK_LABEL(p->midi_labels[i]), 0.0f);
+		gtk_label_set_width_chars(GTK_LABEL(p->midi_labels[i]), 14);
+		gtk_widget_add_css_class(p->midi_labels[i], "mono");
+		gtk_grid_attach(GTK_GRID(grid), p->midi_labels[i], 1, (int)i,
+				1, 1);
+		b = gtk_button_new_with_label("Learn");
+		g_object_set_data(G_OBJECT(b), "control", (gpointer)c[i].name);
+		g_signal_connect(b, "clicked", G_CALLBACK(on_learn), p);
+		gtk_grid_attach(GTK_GRID(grid), b, 2, (int)i, 1, 1);
+		b = gtk_button_new_from_icon_name("edit-clear-symbolic");
+		gtk_widget_set_tooltip_text(b, "Remove this mapping");
+		g_object_set_data(G_OBJECT(b), "control", (gpointer)c[i].name);
+		g_signal_connect(b, "clicked", G_CALLBACK(on_unlearn), p);
+		gtk_grid_attach(GTK_GRID(grid), b, 3, (int)i, 1, 1);
+	}
+	scroll = gtk_scrolled_window_new();
+	gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), grid);
+	gtk_scrolled_window_set_policy(GTK_SCROLLED_WINDOW(scroll),
+				       GTK_POLICY_NEVER, GTK_POLICY_AUTOMATIC);
+	gtk_widget_set_vexpand(scroll, TRUE);
+	gtk_widget_set_hexpand(scroll, TRUE);
+	gtk_grid_attach(GTK_GRID(g), scroll, 0, 2, 2, 1);
+	p->midi_grid = grid;
+
+	refresh_midi(p);
+	p->midi_timer = g_timeout_add(500, midi_tick, p);
 }
 
 static void build_decks(struct prefs *p, GtkWidget *nb)
@@ -528,6 +696,7 @@ void prefs_show(struct app *app, GCallback applied, gpointer data)
 	build_library(p, nb);
 	build_soundcloud(p, nb);
 	build_decks(p, nb);
+	build_midi(p, nb);
 	gtk_widget_set_vexpand(nb, TRUE);
 	gtk_box_append(GTK_BOX(box), nb);
 

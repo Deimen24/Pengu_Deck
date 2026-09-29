@@ -94,9 +94,10 @@ static void set_bpm_label(PdDeckView *v, struct track *t)
 	gtk_label_set_text(GTK_LABEL(v->bpm), s);
 	g_free(s);
 
-	s = g_strdup_printf("%+.2f%%  ±%d", pitch, (int)range);
+	s = g_strdup_printf("%+.2f%%", pitch);
 	gtk_label_set_text(GTK_LABEL(v->pitch_label), s);
 	g_free(s);
+	(void)range;
 }
 
 static void set_status(PdDeckView *v, struct track *t)
@@ -143,6 +144,13 @@ static gboolean tick(GtkWidget *w, GdkFrameClock *clock, gpointer data)
 	if (playing != v->shown_playing) {
 		v->shown_playing = playing;
 		gtk_button_set_label(GTK_BUTTON(v->play), playing ? "⏸" : "▶");
+	}
+	{
+		double want = atomic_load(&v->deck->pitch) * 100.0;
+
+		if (fabs(want - gtk_range_get_value(GTK_RANGE(v->pitch))) >
+		    0.005)
+			gtk_range_set_value(GTK_RANGE(v->pitch), want);
 	}
 	if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(v->keylock)) !=
 	    atomic_load(&v->deck->keylock))
@@ -211,12 +219,14 @@ static void on_cue_release(GtkGestureClick *g, int n, double x, double y,
 
 static void on_sync(GtkButton *b, PdDeckView *v)
 {
-	struct deck *master = &v->app->engine.deck[1 - v->idx];
+	struct deck *master = &v->app->engine.deck[app_sync_master(v->app,
+								   v->idx)];
 	double p = deck_sync_pitch(v->deck, master);
 	double range = v->app->cfg.pitch_range / 100.0;
 
 	if (isnan(p)) {
-		app_toast(v->app, "Sync needs a tempo on both decks");
+		app_toast(v->app, "Sync needs a tempo on this and another "
+			  "deck");
 		return;
 	}
 	if (fabs(p) > range) {
@@ -311,16 +321,6 @@ static void on_loop_double(GtkButton *b, PdDeckView *v)
 	deck_loop_scale(v->deck, 2.0);
 }
 
-static void on_zoom_in(GtkButton *b, PdDeckView *v)
-{
-	pd_waveform_zoom_by(PD_WAVEFORM(v->wave), 1.5);
-}
-
-static void on_zoom_out(GtkButton *b, PdDeckView *v)
-{
-	pd_waveform_zoom_by(PD_WAVEFORM(v->wave), 1.0 / 1.5);
-}
-
 /* ---- drag and drop ----------------------------------------------- */
 
 static gboolean on_drop(GtkDropTarget *t, const GValue *val, double x,
@@ -350,13 +350,12 @@ static gboolean on_drop(GtkDropTarget *t, const GValue *val, double x,
 static GtkWidget *build_header(PdDeckView *v)
 {
 	GtkWidget *grid = gtk_grid_new();
-	char *deck_name = g_strdup_printf("%c", 'A' + v->idx);
+	char deck_name[2] = { app_deck_letter(v->idx), '\0' };
 	GtkWidget *badge = gtk_label_new(deck_name);
 
-	g_free(deck_name);
 	gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
 	gtk_widget_add_css_class(badge, "deck-badge");
-	gtk_widget_add_css_class(badge, v->idx == 0 ? "deck-a" : "deck-b");
+	gtk_widget_add_css_class(badge, app_deck_class(v->idx));
 	gtk_widget_set_valign(badge, GTK_ALIGN_CENTER);
 
 	v->title = gtk_label_new("");
@@ -394,8 +393,7 @@ static GtkWidget *build_loops(PdDeckView *v)
 		const char *label;
 		int quarter_beats;
 	} sizes[] = {
-		{ "¼", 1 }, { "½", 2 }, { "1", 4 }, { "2", 8 }, { "4", 16 },
-		{ "8", 32 }, { "16", 64 },
+		{ "½", 2 }, { "1", 4 }, { "2", 8 }, { "4", 16 }, { "8", 32 },
 	};
 	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
 	GtkWidget *b;
@@ -427,7 +425,7 @@ static GtkWidget *build_hotcues(PdDeckView *v)
 	GtkWidget *b;
 	int i;
 
-	b = gtk_label_new("HOT CUES");
+	b = gtk_label_new("CUES");
 	gtk_widget_add_css_class(b, "section-label");
 	gtk_box_append(GTK_BOX(box), b);
 	for (i = 0; i < DECK_HOTCUES; i++) {
@@ -517,15 +515,6 @@ static GtkWidget *build_transport(PdDeckView *v)
 	g_signal_connect(v->keylock, "toggled", G_CALLBACK(on_keylock), v);
 	gtk_box_append(GTK_BOX(box), v->keylock);
 
-	b = button("−", NULL);
-	gtk_widget_set_tooltip_text(b, "Zoom waveform out (Ctrl+scroll)");
-	gtk_widget_set_margin_start(b, 10);
-	g_signal_connect(b, "clicked", G_CALLBACK(on_zoom_out), v);
-	gtk_box_append(GTK_BOX(box), b);
-	b = button("+", NULL);
-	gtk_widget_set_tooltip_text(b, "Zoom waveform in");
-	g_signal_connect(b, "clicked", G_CALLBACK(on_zoom_in), v);
-	gtk_box_append(GTK_BOX(box), b);
 	return box;
 }
 
@@ -596,13 +585,16 @@ GtkWidget *pd_deck_view_new(struct app *app, int idx)
 	v->app = app;
 	v->idx = idx;
 	v->deck = &app->engine.deck[idx];
-	gtk_widget_add_css_class(GTK_WIDGET(v), idx == 0 ? "deck-a" :
-				 "deck-b");
+	gtk_widget_add_css_class(GTK_WIDGET(v), app_deck_class(idx));
 	gtk_widget_set_hexpand(GTK_WIDGET(v), TRUE);
 
 	gtk_box_append(GTK_BOX(main), build_header(v));
 	v->wave = pd_waveform_new(v->deck, FALSE);
 	v->overview = pd_waveform_new(v->deck, TRUE);
+	gtk_widget_set_tooltip_text(v->wave, "Drag to scratch, scroll to "
+				    "seek, Ctrl+scroll to zoom");
+	pd_waveform_set_color(PD_WAVEFORM(v->wave), app_deck_color(idx));
+	pd_waveform_set_color(PD_WAVEFORM(v->overview), app_deck_color(idx));
 	gtk_box_append(GTK_BOX(main), v->wave);
 	gtk_box_append(GTK_BOX(main), v->overview);
 
@@ -629,7 +621,11 @@ void pd_deck_view_apply_config(PdDeckView *v)
 {
 	int range = v->app->cfg.pitch_range;
 	double cur = gtk_range_get_value(GTK_RANGE(v->pitch));
+	char *tip = g_strdup_printf("Pitch ±%d %% (Preferences → Decks)",
+				    range);
 
+	gtk_widget_set_tooltip_text(v->pitch, tip);
+	g_free(tip);
 	gtk_range_set_range(GTK_RANGE(v->pitch), -range, range);
 	gtk_range_set_value(GTK_RANGE(v->pitch), CLAMP(cur, -range, range));
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(v->keylock),

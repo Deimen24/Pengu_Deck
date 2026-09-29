@@ -136,6 +136,7 @@ GtkWidget *pd_lib_view_new(struct app *app)
 
 	gtk_widget_set_hexpand(pd_media_view_search_entry(v->media), TRUE);
 	gtk_box_append(GTK_BOX(bar), pd_media_view_search_entry(v->media));
+	gtk_box_append(GTK_BOX(bar), pd_media_view_queue_button(v->media));
 	b = gtk_button_new_from_icon_name("folder-new-symbolic");
 	gtk_widget_set_tooltip_text(b, "Add a music folder");
 	gtk_widget_set_focusable(b, FALSE);
@@ -146,6 +147,12 @@ GtkWidget *pd_lib_view_new(struct app *app)
 	gtk_widget_set_focusable(v->rescan, FALSE);
 	g_signal_connect(v->rescan, "clicked", G_CALLBACK(on_rescan), v);
 	gtk_box_append(GTK_BOX(bar), v->rescan);
+	b = gtk_button_new_from_icon_name("edit-clear-all-symbolic");
+	gtk_widget_set_tooltip_text(b, "Reset the played marks (✓)");
+	gtk_widget_set_focusable(b, FALSE);
+	g_signal_connect_swapped(b, "clicked", G_CALLBACK(app_reset_played),
+				 app);
+	gtk_box_append(GTK_BOX(bar), b);
 	v->spinner = gtk_spinner_new();
 	gtk_spinner_set_spinning(GTK_SPINNER(v->spinner), TRUE);
 	gtk_widget_set_visible(v->spinner, FALSE);

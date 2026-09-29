@@ -9,31 +9,109 @@
 #include "decoder.h"
 #include "library.h"
 #include "net.h"
+#include "sccache.h"
+
+static void queue_changed(GListModel *m, guint pos, guint removed,
+			  guint added, gpointer data);
 
 void app_init(struct app *a, GtkApplication *gtk)
 {
+	int i;
+
 	a->gtk = gtk;
 	config_load(&a->cfg);
 	engine_init(&a->engine);
 	atomic_store(&a->engine.xf_curve, a->cfg.xf_curve);
-	atomic_store(&a->engine.deck[0].keylock, a->cfg.keylock);
-	atomic_store(&a->engine.deck[1].keylock, a->cfg.keylock);
+	for (i = 0; i < ENGINE_DECKS; i++)
+		atomic_store(&a->engine.deck[i].keylock, a->cfg.keylock);
 	cuestore_open();
 	net_init();
 	a->library = g_list_store_new(PD_TYPE_MEDIA_ITEM);
 	a->sc_results = g_list_store_new(PD_TYPE_MEDIA_ITEM);
+	a->queue = g_list_store_new(PD_TYPE_MEDIA_ITEM);
+	a->played = g_hash_table_new_full(g_str_hash, g_str_equal, g_free,
+					  NULL);
+	g_signal_connect(a->queue, "items-changed",
+			 G_CALLBACK(queue_changed), a);
+	sccache_init(a);
 }
 
 void app_shutdown(struct app *a)
 {
-	app_save_cues(a, 0);
-	app_save_cues(a, 1);
+	int i;
+
+	sccache_shutdown();
+	for (i = 0; i < ENGINE_DECKS; i++)
+		app_save_cues(a, i);
 	engine_fini(&a->engine);
 	cuestore_close();
 	config_save(&a->cfg);
 	config_clear(&a->cfg);
 	g_clear_object(&a->library);
 	g_clear_object(&a->sc_results);
+	g_clear_object(&a->queue);
+	g_clear_pointer(&a->played, g_hash_table_unref);
+}
+
+/* Queued SoundCloud tracks are downloaded right away. */
+static void queue_changed(GListModel *m, guint pos, guint removed,
+			  guint added, gpointer data)
+{
+	guint i;
+
+	for (i = pos; i < pos + added; i++) {
+		PdMediaItem *item = g_list_model_get_item(m, i);
+
+		sccache_fetch(item);
+		g_object_unref(item);
+	}
+}
+
+static void notify_store(GListStore *s, PdMediaItem *m)
+{
+	guint n = g_list_model_get_n_items(G_LIST_MODEL(s)), i;
+
+	for (i = 0; i < n; i++) {
+		PdMediaItem *x = g_list_model_get_item(G_LIST_MODEL(s), i);
+
+		g_object_unref(x);
+		if (x == m || g_str_equal(x->key, m->key))
+			g_list_model_items_changed(G_LIST_MODEL(s), i, 1, 1);
+	}
+}
+
+void app_item_changed(struct app *a, PdMediaItem *m)
+{
+	notify_store(a->library, m);
+	notify_store(a->sc_results, m);
+	notify_store(a->queue, m);
+}
+
+bool app_item_played(struct app *a, PdMediaItem *m)
+{
+	return g_hash_table_contains(a->played, m->key);
+}
+
+void app_reset_played(struct app *a)
+{
+	GList *keys = g_hash_table_get_keys(a->played), *l;
+
+	for (l = keys; l; l = l->next) {
+		PdMediaItem probe = { .key = l->data };
+
+		g_hash_table_steal(a->played, l->data);
+		app_item_changed(a, &probe);
+		g_free(l->data);
+	}
+	g_list_free(keys);
+}
+
+static void mark_played(struct app *a, PdMediaItem *m)
+{
+	if (g_hash_table_contains(a->played, m->key))
+		return;
+	g_hash_table_add(a->played, g_strdup(m->key));
+	app_item_changed(a, m);
 }
 
 gboolean app_open_audio(struct app *a, char **warn)
@@ -179,12 +257,22 @@ static gpointer sc_load_thread(gpointer data)
 void app_load_item(struct app *a, int idx, PdMediaItem *m)
 {
 	struct sc_load *l;
+	char *cached;
 
+	mark_played(a, m);
 	if (m->source == MEDIA_LOCAL) {
 		load_uri(a, idx, m->location, m->key, m->title, m->artist,
 			 m->bpm);
 		return;
 	}
+	cached = sccache_lookup(m);
+	if (cached) {
+		load_uri(a, idx, cached, m->key, m->title, m->artist, m->bpm);
+		g_free(cached);
+		return;
+	}
+	/* Stream now, and keep a copy for next time. */
+	sccache_fetch(m);
 	if (a->loading[idx])
 		return;
 	a->loading[idx] = TRUE;
@@ -196,7 +284,65 @@ void app_load_item(struct app *a, int idx, PdMediaItem *m)
 	g_thread_unref(g_thread_new("pd-sc-load", sc_load_thread, l));
 }
 
+void app_unload(struct app *a, int idx)
+{
+	struct deck *d = &a->engine.deck[idx];
+	struct track *old;
+
+	app_save_cues(a, idx);
+	atomic_store(&d->playing, false);
+	old = atomic_exchange(&d->track, NULL);
+	while (atomic_load(&d->in_use))
+		g_thread_yield();
+	if (old) {
+		atomic_store(&old->cancel, true);
+		track_unref(old);
+	}
+}
+
 /* ---- misc -------------------------------------------------------- */
+
+int app_sync_master(struct app *a, int idx)
+{
+	int i;
+
+	for (i = 0; i < a->cfg.ndecks; i++)
+		if (i != idx && atomic_load(&a->engine.deck[i].playing) &&
+		    deck_bpm(&a->engine.deck[i]) > 0.0)
+			return i;
+	for (i = 0; i < a->cfg.ndecks; i++)
+		if (i != idx && deck_bpm(&a->engine.deck[i]) > 0.0)
+			return i;
+	return idx ^ 1;
+}
+
+void app_set_deck_count(struct app *a, int n)
+{
+	a->cfg.ndecks = CLAMP(n, 2, ENGINE_DECKS);
+	config_save(&a->cfg);
+}
+
+static const char *const deck_colors[ENGINE_DECKS] = {
+	"#4fc3f7", "#ff8a65", "#7bd88f", "#c792ea",
+};
+static const char *const deck_classes[ENGINE_DECKS] = {
+	"deck-a", "deck-b", "deck-c", "deck-d",
+};
+
+const char *app_deck_color(int idx)
+{
+	return deck_colors[CLAMP(idx, 0, ENGINE_DECKS - 1)];
+}
+
+const char *app_deck_class(int idx)
+{
+	return deck_classes[CLAMP(idx, 0, ENGINE_DECKS - 1)];
+}
+
+char app_deck_letter(int idx)
+{
+	return (char)('A' + CLAMP(idx, 0, ENGINE_DECKS - 1));
+}
 
 struct sc_auth *app_sc_auth(struct app *a)
 {

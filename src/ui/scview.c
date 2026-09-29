@@ -159,6 +159,7 @@ GtkWidget *pd_sc_view_new(struct app *app)
 	g_signal_connect(v->entry, "activate", G_CALLBACK(on_activate), v);
 	gtk_box_append(GTK_BOX(bar), v->entry);
 
+	gtk_box_append(GTK_BOX(bar), pd_media_view_queue_button(v->media));
 	v->likes = gtk_button_new_with_label("♥ Likes");
 	gtk_widget_set_tooltip_text(v->likes, "Load your liked tracks "
 				    "(needs an OAuth token in Preferences)");

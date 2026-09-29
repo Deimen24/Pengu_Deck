@@ -16,6 +16,8 @@ G_DECLARE_FINAL_TYPE(PdMixerView, pd_mixer_view, PD, MIXER_VIEW, GtkBox)
 
 GtkWidget *pd_mixer_view_new(struct app *app);
 void pd_mixer_view_nudge_xfader(PdMixerView *v, double delta);
+void pd_mixer_view_set_xfader(PdMixerView *v, double value);
+void pd_mixer_view_set_decks(PdMixerView *v, int n);
 void pd_mixer_view_apply_config(PdMixerView *v);
 
 G_END_DECLS

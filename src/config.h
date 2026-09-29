@@ -29,9 +29,14 @@ struct config {
 	char *sc_token;
 
 	/* decks */
+	int ndecks;		/* 2 to 4 shown */
 	int pitch_range;	/* percent: 8, 16 or 50 */
 	gboolean keylock;
 	gboolean quantize;
+
+	/* automix */
+	int automix_fade;	/* seconds */
+	gboolean automix_sync;
 };
 
 void config_load(struct config *c);

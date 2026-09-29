@@ -20,9 +20,9 @@ struct engine_priv {
 	bool ctx_ok;
 	bool dev_ok;
 
-	float gain[2];		/* smoothed channel gains */
+	float gain[ENGINE_DECKS];	/* smoothed channel gains */
 	float lim;		/* limiter gain */
-	float deck_buf[2][DECK_MAX_BLOCK * 2];
+	float deck_buf[ENGINE_DECKS][DECK_MAX_BLOCK * 2];
 	float mix[DECK_MAX_BLOCK * 2];
 	float cue[DECK_MAX_BLOCK * 2];
 
@@ -38,9 +38,11 @@ struct engine_priv {
 
 void engine_init(struct engine *e)
 {
+	int i;
+
 	memset(e, 0, sizeof(*e));
-	deck_init(&e->deck[0], 0);
-	deck_init(&e->deck[1], 1);
+	for (i = 0; i < ENGINE_DECKS; i++)
+		deck_init(&e->deck[i], i);
 	atomic_init(&e->master, 1.0f);
 	atomic_init(&e->cue_mix, 0.0f);
 	atomic_init(&e->cue_vol, 1.0f);
@@ -50,10 +52,12 @@ void engine_init(struct engine *e)
 
 void engine_fini(struct engine *e)
 {
+	int i;
+
 	engine_record_stop(e);
 	engine_close(e);
-	deck_fini(&e->deck[0]);
-	deck_fini(&e->deck[1]);
+	for (i = 0; i < ENGINE_DECKS; i++)
+		deck_fini(&e->deck[i]);
 	g_free(e->priv);
 	e->priv = NULL;
 }
@@ -84,7 +88,7 @@ static void xfade_gains(int curve, float x, float *ga, float *gb)
 static void mix_block(struct engine *e, unsigned int n)
 {
 	struct engine_priv *p = e->priv;
-	float target[2], xa, xb, step[2];
+	float target[ENGINE_DECKS], xa, xb, step[ENGINE_DECKS];
 	float master = atomic_load(&e->master);
 	float pk_l = 0.0f, pk_r = 0.0f;
 	unsigned int i;
@@ -92,22 +96,22 @@ static void mix_block(struct engine *e, unsigned int n)
 
 	xfade_gains(atomic_load(&e->xf_curve), atomic_load(&e->xfader),
 		    &xa, &xb);
-	for (k = 0; k < 2; k++) {
+	for (k = 0; k < ENGINE_DECKS; k++) {
 		float v = atomic_load(&e->deck[k].volume);
+		int side = atomic_load(&e->deck[k].xf_side);
 
-		target[k] = v * v * (k == 0 ? xa : xb);
+		target[k] = v * v * (side < 0 ? xa : side > 0 ? xb : 1.0f);
 		step[k] = (target[k] - p->gain[k]) / (float)n;
 	}
 
 	for (i = 0; i < 2 * n; i += 2) {
-		float l, r, a;
+		float l = 0.0f, r = 0.0f, a;
 
-		p->gain[0] += step[0];
-		p->gain[1] += step[1];
-		l = p->deck_buf[0][i] * p->gain[0] +
-		    p->deck_buf[1][i] * p->gain[1];
-		r = p->deck_buf[0][i + 1] * p->gain[0] +
-		    p->deck_buf[1][i + 1] * p->gain[1];
+		for (k = 0; k < ENGINE_DECKS; k++) {
+			p->gain[k] += step[k];
+			l += p->deck_buf[k][i] * p->gain[k];
+			r += p->deck_buf[k][i + 1] * p->gain[k];
+		}
 		l *= master;
 		r *= master;
 
@@ -125,8 +129,8 @@ static void mix_block(struct engine *e, unsigned int n)
 		pk_l = fmaxf(pk_l, fabsf(l));
 		pk_r = fmaxf(pk_r, fabsf(r));
 	}
-	p->gain[0] = target[0];
-	p->gain[1] = target[1];
+	for (k = 0; k < ENGINE_DECKS; k++)
+		p->gain[k] = target[k];
 
 	if (pk_l > atomic_load(&e->peak_l))
 		atomic_store(&e->peak_l, pk_l);
@@ -139,19 +143,19 @@ static void cue_block(struct engine *e, unsigned int n)
 	struct engine_priv *p = e->priv;
 	float mix = atomic_load(&e->cue_mix);
 	float vol = atomic_load(&e->cue_vol);
-	bool pfl[2];
+	bool pfl[ENGINE_DECKS];
 	unsigned int i;
+	int k;
 
-	pfl[0] = atomic_load(&e->deck[0].pfl);
-	pfl[1] = atomic_load(&e->deck[1].pfl);
+	for (k = 0; k < ENGINE_DECKS; k++)
+		pfl[k] = atomic_load(&e->deck[k].pfl);
 
 	for (i = 0; i < 2 * n; i++) {
 		float c = 0.0f;
 
-		if (pfl[0])
-			c += p->deck_buf[0][i];
-		if (pfl[1])
-			c += p->deck_buf[1][i];
+		for (k = 0; k < ENGINE_DECKS; k++)
+			if (pfl[k])
+				c += p->deck_buf[k][i];
 		c = (c * (1.0f - mix) + p->mix[i] * mix) * vol;
 		p->cue[i] = fmaxf(-1.0f, fminf(1.0f, c));
 	}
@@ -216,12 +220,13 @@ static void output_block(struct engine *e, float *out, unsigned int n)
 void engine_process(struct engine *e, float *out, unsigned int n)
 {
 	struct engine_priv *p = e->priv;
+	int d;
 
 	while (n) {
 		unsigned int k = n > DECK_MAX_BLOCK ? DECK_MAX_BLOCK : n;
 
-		deck_render(&e->deck[0], p->deck_buf[0], k);
-		deck_render(&e->deck[1], p->deck_buf[1], k);
+		for (d = 0; d < ENGINE_DECKS; d++)
+			deck_render(&e->deck[d], p->deck_buf[d], k);
 		mix_block(e, k);
 		if (e->hp_mode != HP_OFF)
 			cue_block(e, k);
@@ -329,6 +334,7 @@ int engine_open(struct engine *e, const struct engine_opts *o, char **err)
 	ma_device_config cfg;
 	ma_device_id id;
 	char name[MA_MAX_DEVICE_NAME_LENGTH + 1];
+	int i;
 
 	engine_close(e);
 	if (context_init(&p->ctx, o->backend) != 0) {
@@ -360,8 +366,8 @@ int engine_open(struct engine *e, const struct engine_opts *o, char **err)
 	e->rate = p->dev.sampleRate;
 	e->channels = p->dev.playback.channels;
 	e->hp_mode = o->hp_mode;
-	deck_set_rate(&e->deck[0], e->rate);
-	deck_set_rate(&e->deck[1], e->rate);
+	for (i = 0; i < ENGINE_DECKS; i++)
+		deck_set_rate(&e->deck[i], e->rate);
 
 	ma_device_get_name(&p->dev, ma_device_type_playback, name,
 			   sizeof(name), NULL);

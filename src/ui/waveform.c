@@ -9,8 +9,8 @@
 #define ZOOM_DEFAULT	120.0
 #define ZOOM_MIN	20.0
 #define ZOOM_MAX	1200.0
-#define ZOOMED_H	110
-#define OVERVIEW_H	46
+#define ZOOMED_H	96
+#define OVERVIEW_H	40
 
 struct _PdWaveform {
 	GtkWidget parent;
@@ -42,18 +42,25 @@ static void wave_measure(GtkWidget *w, GtkOrientation o, int for_size,
 	}
 }
 
-static void fill(GtkSnapshot *snap, const char *hex, float alpha,
-		 float x, float y, float w, float h)
+static void fill_rgba(GtkSnapshot *snap, GdkRGBA c, float alpha,
+		      float x, float y, float w, float h)
 {
 	graphene_rect_t r;
-	GdkRGBA c;
 
 	if (w <= 0 || h <= 0)
 		return;
-	gdk_rgba_parse(&c, hex);
 	c.alpha = alpha;
 	graphene_rect_init(&r, x, y, w, h);
 	gtk_snapshot_append_color(snap, &c, &r);
+}
+
+static void fill(GtkSnapshot *snap, const char *hex, float alpha,
+		 float x, float y, float w, float h)
+{
+	GdkRGBA c;
+
+	gdk_rgba_parse(&c, hex);
+	fill_rgba(snap, c, alpha, x, y, w, h);
 }
 
 /* Draw one column of the three band waveform, bins [b0, b1). */
@@ -180,6 +187,11 @@ static void wave_snapshot(GtkWidget *w, GtkSnapshot *snap)
 		draw_column(snap, t, b0, b1, x, 1.0f, mid, half);
 	}
 
+	/* Played part of the overview in the deck colour. */
+	if (wf->overview)
+		fill_rgba(snap, wf->accent, 0.18f, 0, 0, (float)playhead_x,
+			  height);
+
 	/* Loading progress on the overview. */
 	if (wf->overview && !track_done(t) && len > 0) {
 		float lx = (float)(track_frames(t) / frames_per_px);
@@ -195,9 +207,10 @@ static void wave_snapshot(GtkWidget *w, GtkSnapshot *snap)
 	/* playhead */
 	fill(snap, "#ffffff", 1.0f, (float)playhead_x - 1, 0, 2, height);
 	if (!wf->overview) {
-		fill(snap, "#ffffff", 0.35f, (float)playhead_x - 3, 0, 6, 6);
-		fill(snap, "#ffffff", 0.35f, (float)playhead_x - 3, height - 6,
-		     6, 6);
+		fill_rgba(snap, wf->accent, 1.0f, (float)playhead_x - 4, 0, 8,
+			  5);
+		fill_rgba(snap, wf->accent, 1.0f, (float)playhead_x - 4,
+			  height - 5, 8, 5);
 	}
 }
 
@@ -314,6 +327,7 @@ static void pd_waveform_init(PdWaveform *wf)
 {
 	wf->zoom = ZOOM_DEFAULT;
 	wf->last_pos = -1.0;
+	gdk_rgba_parse(&wf->accent, "#4fc3f7");
 	gtk_widget_set_hexpand(GTK_WIDGET(wf), TRUE);
 	gtk_widget_set_overflow(GTK_WIDGET(wf), GTK_OVERFLOW_HIDDEN);
 }
@@ -367,4 +381,5 @@ void pd_waveform_zoom_by(PdWaveform *wf, double factor)
 void pd_waveform_set_color(PdWaveform *wf, const char *hex)
 {
 	gdk_rgba_parse(&wf->accent, hex);
+	gtk_widget_queue_draw(GTK_WIDGET(wf));
 }

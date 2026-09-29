@@ -3,6 +3,7 @@
  * mediaview.c - track list
  */
 #include "mediaview.h"
+#include "sccache.h"
 
 struct _PdMediaView {
 	GtkBox parent;
@@ -95,6 +96,7 @@ static void drag_begin(GtkDragSource *src, GdkDrag *drag, GtkListItem *li)
 /* ---- cells ------------------------------------------------------- */
 
 enum column {
+	COL_STATE,
 	COL_TITLE,
 	COL_ARTIST,
 	COL_ALBUM,
@@ -126,11 +128,30 @@ static void bind_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 {
 	PdMediaItem *m = gtk_list_item_get_item(li);
 	GtkWidget *l = gtk_list_item_get_child(li);
+	PdMediaView *v = g_object_get_data(G_OBJECT(f), "view");
 	enum column col = GPOINTER_TO_INT(data);
 	char *tmp = NULL;
 	const char *text = "";
 
+	if (app_item_played(v->app, m))
+		gtk_widget_add_css_class(l, "played");
+	else
+		gtk_widget_remove_css_class(l, "played");
+
 	switch (col) {
+	case COL_STATE: {
+		int pc = sccache_progress(m);
+
+		if (app_item_played(v->app, m))
+			text = "✓";
+		if (pc == 100)
+			text = tmp = g_strdup_printf("%s ⬇", text);
+		else if (pc >= 0)
+			text = tmp = g_strdup_printf("%s %d%%", text, pc);
+		else if (pc == -2)
+			text = tmp = g_strdup_printf("%s ✗", text);
+		break;
+	}
 	case COL_TITLE:
 		if (m->source == MEDIA_SOUNDCLOUD && m->preview)
 			text = tmp = g_strdup_printf("%s (preview)",
@@ -165,6 +186,7 @@ static void add_column(PdMediaView *v, const char *title, enum column col,
 	GtkListItemFactory *f = gtk_signal_list_item_factory_new();
 	GtkColumnViewColumn *c;
 
+	g_object_set_data(G_OBJECT(f), "view", v);
 	g_signal_connect(f, "setup", G_CALLBACK(setup_cell),
 			 GINT_TO_POINTER(col));
 	g_signal_connect(f, "bind", G_CALLBACK(bind_cell),
@@ -187,19 +209,18 @@ static PdMediaItem *selected(PdMediaView *v)
 	return gtk_single_selection_get_selected_item(v->selection);
 }
 
-/* Prefer the deck that is not playing, else the one without a track. */
+/* Prefer an empty visible deck, then a paused one, then deck A. */
 static int free_deck(struct app *a)
 {
 	struct deck *d = a->engine.deck;
+	int i;
 
-	if (!deck_track(&d[0]))
-		return 0;
-	if (!deck_track(&d[1]))
-		return 1;
-	if (atomic_load(&d[0].playing) && !atomic_load(&d[1].playing))
-		return 1;
-	if (atomic_load(&d[1].playing) && !atomic_load(&d[0].playing))
-		return 0;
+	for (i = 0; i < a->cfg.ndecks; i++)
+		if (!deck_track(&d[i]))
+			return i;
+	for (i = 0; i < a->cfg.ndecks; i++)
+		if (!atomic_load(&d[i].playing))
+			return i;
 	return 0;
 }
 
@@ -221,14 +242,9 @@ void pd_media_view_load_selected(PdMediaView *v, int idx)
 		app_load_item(v->app, idx, m);
 }
 
-static void on_load_a(GSimpleAction *a, GVariant *p, gpointer data)
+static void on_load_deck(GSimpleAction *a, GVariant *p, gpointer data)
 {
-	pd_media_view_load_selected(data, 0);
-}
-
-static void on_load_b(GSimpleAction *a, GVariant *p, gpointer data)
-{
-	pd_media_view_load_selected(data, 1);
+	pd_media_view_load_selected(data, g_variant_get_int32(p));
 }
 
 static void on_open_link(GSimpleAction *a, GVariant *p, gpointer data)
@@ -244,12 +260,19 @@ static void on_open_link(GSimpleAction *a, GVariant *p, gpointer data)
 	g_object_unref(l);
 }
 
+static GMenuModel *build_menu(PdMediaView *v);
+
 static void on_right_click(GtkGestureClick *g, int n, double x, double y,
 			   PdMediaView *v)
 {
 	GtkWidget *pop = g_object_get_data(G_OBJECT(v), "popover");
 	GdkRectangle r = { (int)x, (int)y, 1, 1 };
 
+	GMenuModel *menu = build_menu(v);
+
+	/* Rebuild the menu so it lists exactly the visible decks. */
+	gtk_popover_menu_set_menu_model(GTK_POPOVER_MENU(pop), menu);
+	g_object_unref(menu);
 	gtk_popover_set_pointing_to(GTK_POPOVER(pop), &r);
 	gtk_popover_popup(GTK_POPOVER(pop));
 }
@@ -295,26 +318,82 @@ static void pd_media_view_init(PdMediaView *v)
 {
 }
 
-static GtkWidget *build_popover(PdMediaView *v, gboolean soundcloud)
+static GMenuModel *build_menu(PdMediaView *v)
 {
 	GMenu *menu = g_menu_new();
+	int i;
+
+	for (i = 0; i < v->app->cfg.ndecks; i++) {
+		char *label = g_strdup_printf("Load to deck %c",
+					      app_deck_letter(i));
+		GMenuItem *item = g_menu_item_new(label, NULL);
+
+		g_menu_item_set_action_and_target(item, "media.load", "i", i);
+		g_menu_append_item(menu, item);
+		g_object_unref(item);
+		g_free(label);
+	}
+	g_menu_append(menu, "Add to automix queue", "media.queue");
+	if (v->store == v->app->sc_results) {
+		g_menu_append(menu, "Download to cache", "media.cache");
+		g_menu_append(menu, "Open on SoundCloud", "media.open-link");
+	}
+	return G_MENU_MODEL(menu);
+}
+
+void pd_media_view_queue_selected(PdMediaView *v)
+{
+	PdMediaItem *m = selected(v);
+
+	if (!m)
+		return;
+	g_list_store_append(v->app->queue, m);
+	app_toast(v->app, "Queued \"%s\"", m->title);
+}
+
+static void on_queue(GSimpleAction *a, GVariant *p, gpointer data)
+{
+	pd_media_view_queue_selected(data);
+}
+
+GtkWidget *pd_media_view_queue_button(PdMediaView *v)
+{
+	GtkWidget *b = gtk_button_new_with_label("+ Queue");
+
+	gtk_widget_add_css_class(b, "queue-button");
+	gtk_widget_set_focusable(b, FALSE);
+	gtk_widget_set_tooltip_text(b, "Add the selected track to the "
+				    "automix queue");
+	g_signal_connect_swapped(b, "clicked",
+				 G_CALLBACK(pd_media_view_queue_selected), v);
+	return b;
+}
+
+static void on_cache(GSimpleAction *a, GVariant *p, gpointer data)
+{
+	PdMediaItem *m = selected(data);
+
+	if (m)
+		sccache_fetch(m);
+}
+
+static GtkWidget *build_popover(PdMediaView *v)
+{
 	GSimpleActionGroup *grp = g_simple_action_group_new();
 	static const GActionEntry entries[] = {
-		{ "load-a", on_load_a },
-		{ "load-b", on_load_b },
+		{ "load", on_load_deck, "i" },
+		{ "queue", on_queue },
+		{ "cache", on_cache },
 		{ "open-link", on_open_link },
 	};
+	GMenuModel *menu = build_menu(v);
 	GtkWidget *pop;
 
 	g_action_map_add_action_entries(G_ACTION_MAP(grp), entries,
 					G_N_ELEMENTS(entries), v);
 	gtk_widget_insert_action_group(GTK_WIDGET(v), "media",
 				       G_ACTION_GROUP(grp));
-	g_menu_append(menu, "Load to deck A", "media.load-a");
-	g_menu_append(menu, "Load to deck B", "media.load-b");
-	if (soundcloud)
-		g_menu_append(menu, "Open on SoundCloud", "media.open-link");
-	pop = gtk_popover_menu_new_from_model(G_MENU_MODEL(menu));
+	pop = gtk_popover_menu_new_from_model(menu);
 	gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
 	gtk_widget_set_parent(pop, v->view);
 	g_object_unref(menu);
@@ -359,6 +438,7 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 #define NUM_SORTER(field) \
 	GTK_SORTER(gtk_custom_sorter_new(cmp_double, \
 		GSIZE_TO_POINTER(G_STRUCT_OFFSET(PdMediaItem, field)), NULL))
+	add_column(v, "", COL_STATE, STR_SORTER(key), FALSE, 64);
 	add_column(v, "Title", COL_TITLE, STR_SORTER(title), TRUE, 0);
 	add_column(v, "Artist", COL_ARTIST, STR_SORTER(artist), TRUE, 0);
 	if (!sc)
@@ -376,7 +456,7 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 				      GDK_BUTTON_SECONDARY);
 	g_signal_connect(click, "pressed", G_CALLBACK(on_right_click), v);
 	gtk_widget_add_controller(v->view, GTK_EVENT_CONTROLLER(click));
-	pop = build_popover(v, sc);
+	pop = build_popover(v);
 	g_object_set_data(G_OBJECT(v), "popover", pop);
 
 	scroll = gtk_scrolled_window_new();

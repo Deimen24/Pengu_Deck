@@ -18,6 +18,7 @@ double pd_knob_get_value(PdKnob *k);
 void pd_knob_set_value(PdKnob *k, double v);
 /* Centre detent: the knob snaps to @def when close to it. */
 void pd_knob_set_detent(PdKnob *k, gboolean on);
+void pd_knob_set_accent(PdKnob *k, const char *hex);
 /* Emitted as "changed" when the value changes through the widget. */
 
 G_END_DECLS

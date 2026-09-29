@@ -18,6 +18,7 @@ struct _PdKnob {
 	double drag_start;
 	gboolean detent;
 	gboolean bipolar;
+	GdkRGBA accent;
 };
 
 enum {
@@ -69,7 +70,7 @@ static void knob_snapshot(GtkWidget *w, GtkSnapshot *snap)
 	graphene_rect_init(&bounds, 0, 0, width, KNOB_SIZE + LABEL_H);
 	cr = gtk_snapshot_append_cairo(snap, &bounds);
 	gtk_widget_get_color(w, &fg);
-	gdk_rgba_parse(&accent, "#4fc3f7");
+	accent = k->accent;
 
 	/* track */
 	cairo_set_line_width(cr, 3.0);
@@ -195,6 +196,7 @@ GtkWidget *pd_knob_new(const char *label, double min, double max, double def)
 	k->value = def;
 	k->bipolar = def > min && def < max;
 	k->detent = k->bipolar;
+	gdk_rgba_parse(&k->accent, "#4fc3f7");
 	gtk_widget_set_tooltip_text(GTK_WIDGET(k), label);
 	return GTK_WIDGET(k);
 }
@@ -212,4 +214,10 @@ void pd_knob_set_value(PdKnob *k, double v)
 void pd_knob_set_detent(PdKnob *k, gboolean on)
 {
 	k->detent = on;
+}
+
+void pd_knob_set_accent(PdKnob *k, const char *hex)
+{
+	gdk_rgba_parse(&k->accent, hex);
+	gtk_widget_queue_draw(GTK_WIDGET(k));
 }

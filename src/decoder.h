@@ -2,6 +2,8 @@
 #ifndef PD_DECODER_H
 #define PD_DECODER_H
 
+#include <libavformat/avformat.h>
+
 #include "track.h"
 
 /*
@@ -23,6 +25,13 @@ struct media_tags {
 	double duration;	/* seconds, 0 if unknown */
 	double bpm;		/* from tags, 0 if absent */
 };
+
+/*
+ * Open @uri with the network options used for streams.  @cancel, when
+ * not NULL, aborts blocking I/O once set.  Returns an AVERROR code.
+ */
+int decoder_open_input(AVFormatContext **fmt, const char *uri,
+		       atomic_bool *cancel);
 
 /* Read metadata without decoding audio.  Returns 0 on success. */
 int decoder_probe(const char *path, struct media_tags *tags);

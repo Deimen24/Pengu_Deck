@@ -20,6 +20,12 @@
 #define DECK_MAX_BLOCK		2048
 #define DECK_NO_SEEK		(-1e18)
 
+enum xf_side {
+	XF_LEFT = -1,
+	XF_THRU = 0,
+	XF_RIGHT = 1,
+};
+
 enum eq_band {
 	EQ_LOW,
 	EQ_MID,
@@ -55,6 +61,7 @@ struct deck {
 	atomic_bool eq_kill[EQ_BANDS];
 	_Atomic float filter;		/* -1 low pass .. 0 off .. 1 high pass */
 	_Atomic float volume;		/* channel fader 0..1 */
+	atomic_int xf_side;		/* enum xf_side */
 	atomic_bool pfl;
 	_Atomic float peak_l;		/* max since last read by the gui */
 	_Atomic float peak_r;

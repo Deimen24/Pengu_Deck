@@ -1,54 +1,76 @@
-/* Pengu Deck - dark club theme */
+/* Pengu Deck - colourful club theme */
+
+@define-color bg #14161a;
+@define-color panel #1c1f26;
+@define-color panel2 #22262e;
+@define-color line #2c313a;
+@define-color fg #eceff3;
+@define-color dim #8f98a6;
+@define-color deck-a #4fc3f7;
+@define-color deck-b #ff8a65;
+@define-color deck-c #7bd88f;
+@define-color deck-d #c792ea;
+@define-color play #43c26d;
+@define-color cue #ffa726;
+@define-color sync #4fc3f7;
+@define-color key #c792ea;
+@define-color loop #7bd88f;
+@define-color hot #ef5da8;
+@define-color rec #e0463b;
 
 window {
-	background: #16181c;
-	color: #e6e6e6;
+	background: @bg;
+	color: @fg;
 }
 
 headerbar {
-	background: #1c1f24;
-	border-bottom: 1px solid #2a2e35;
-	color: #e6e6e6;
+	background: linear-gradient(90deg, #1b2a38, #1c1f26 40%, #2a1e2b);
+	border-bottom: 1px solid @line;
+	color: @fg;
 }
 
 headerbar .title {
-	font-weight: 700;
-	letter-spacing: 1px;
+	font-weight: 800;
+	letter-spacing: 2px;
+	color: @deck-a;
 }
+
+button.deck-count {
+	min-width: 26px;
+	padding: 2px 8px;
+}
+
+button.deck-count:checked {
+	background: @deck-a;
+	color: #06202b;
+}
+
+/* ---- decks ------------------------------------------------------- */
 
 deck {
-	background: #1c1f24;
-	border: 1px solid #2a2e35;
-	border-radius: 8px;
+	background: @panel;
+	border: 1px solid @line;
+	border-radius: 10px;
 	padding: 8px;
 }
 
-deck.deck-a { border-top: 3px solid #4fc3f7; }
-deck.deck-b { border-top: 3px solid #ff8a65; }
-
-mixer {
-	background: #1c1f24;
-	border: 1px solid #2a2e35;
-	border-radius: 8px;
-	padding: 8px;
-}
-
-.strip {
-	padding: 2px 4px;
-	border-radius: 6px;
-	background: #191c20;
-}
+deck.deck-a { border-top: 4px solid @deck-a; background: linear-gradient(180deg, alpha(@deck-a, 0.10), @panel 140px); }
+deck.deck-b { border-top: 4px solid @deck-b; background: linear-gradient(180deg, alpha(@deck-b, 0.10), @panel 140px); }
+deck.deck-c { border-top: 4px solid @deck-c; background: linear-gradient(180deg, alpha(@deck-c, 0.10), @panel 140px); }
+deck.deck-d { border-top: 4px solid @deck-d; background: linear-gradient(180deg, alpha(@deck-d, 0.10), @panel 140px); }
 
 .deck-badge {
 	font-size: 22px;
 	font-weight: 800;
 	padding: 4px 12px;
-	border-radius: 6px;
-	color: #16181c;
+	border-radius: 8px;
+	color: @bg;
 }
 
-label.deck-badge.deck-a { background: #4fc3f7; }
-label.deck-badge.deck-b { background: #ff8a65; }
+label.deck-badge.deck-a { background: @deck-a; }
+label.deck-badge.deck-b { background: @deck-b; }
+label.deck-badge.deck-c { background: @deck-c; }
+label.deck-badge.deck-d { background: @deck-d; }
 
 .track-title {
 	font-size: 15px;
@@ -75,12 +97,12 @@ label.deck-badge.deck-b { background: #ff8a65; }
 	font-size: 10px;
 	font-weight: 700;
 	letter-spacing: 1.5px;
-	color: #8a919c;
-	margin: 0 6px;
+	color: @dim;
+	margin: 0 4px;
 }
 
 .dim-label {
-	color: #8a919c;
+	color: @dim;
 }
 
 .error {
@@ -88,20 +110,52 @@ label.deck-badge.deck-b { background: #ff8a65; }
 }
 
 waveform {
-	border-radius: 4px;
-	background: #101215;
+	border-radius: 6px;
+	background: #0e1013;
 }
 
 meter {
 	border-radius: 2px;
 }
 
+/* ---- mixer ------------------------------------------------------- */
+
+mixer {
+	background: @panel;
+	border: 1px solid @line;
+	border-radius: 10px;
+	padding: 6px;
+}
+
+.strip {
+	padding: 2px 3px;
+	border-radius: 8px;
+	background: @panel2;
+}
+
+.strip.deck-a { box-shadow: inset 0 3px 0 @deck-a; }
+.strip.deck-b { box-shadow: inset 0 3px 0 @deck-b; }
+.strip.deck-c { box-shadow: inset 0 3px 0 @deck-c; }
+.strip.deck-d { box-shadow: inset 0 3px 0 @deck-d; }
+
+.strip.deck-a .deck-letter { color: @deck-a; }
+.strip.deck-b .deck-letter { color: @deck-b; }
+.strip.deck-c .deck-letter { color: @deck-c; }
+.strip.deck-d .deck-letter { color: @deck-d; }
+
+.deck-letter {
+	font-size: 13px;
+	margin-top: 4px;
+}
+
+/* ---- buttons ----------------------------------------------------- */
+
 button {
-	background: #262a31;
-	color: #e6e6e6;
-	border: 1px solid #343941;
-	border-radius: 5px;
-	padding: 4px 8px;
+	background: #2a2f38;
+	color: @fg;
+	border: 1px solid #3a4150;
+	border-radius: 6px;
+	padding: 4px 7px;
 	min-height: 28px;
 	box-shadow: none;
 	text-shadow: none;
@@ -109,63 +163,78 @@ button {
 }
 
 button:hover {
-	background: #30353d;
+	background: #353b46;
 }
 
 button:active,
 button:checked {
-	background: #3b414a;
+	background: #414857;
 }
 
 button.play-button {
 	min-width: 64px;
 	font-size: 18px;
-	background: #2c4a3a;
-	border-color: #3a6b4f;
+	background: alpha(@play, 0.25);
+	border-color: alpha(@play, 0.6);
+	color: @play;
 }
 
 button.play-button:checked {
-	background: #43c26d;
+	background: @play;
 	color: #0d1a12;
+	box-shadow: 0 0 10px alpha(@play, 0.6);
 }
 
 button.cue-button {
 	min-width: 56px;
-	background: #4a3a1e;
-	border-color: #6b5427;
-	color: #ffb74d;
+	background: alpha(@cue, 0.22);
+	border-color: alpha(@cue, 0.6);
+	color: @cue;
 }
 
 button.cue-button:active {
-	background: #ffa726;
+	background: @cue;
 	color: #1a1200;
 }
 
 button.sync-button {
-	background: #1e3a4a;
-	border-color: #27566b;
-	color: #4fc3f7;
+	background: alpha(@sync, 0.18);
+	border-color: alpha(@sync, 0.6);
+	color: @sync;
 }
 
-button.hotcue {
-	min-width: 36px;
-	color: #8a919c;
+button.sync-button:active {
+	background: @sync;
+	color: #06202b;
 }
 
-button.hotcue.set {
-	background: #ef5da8;
-	border-color: #ef5da8;
+deck button.hotcue {
+	min-width: 30px;
+	color: @dim;
+	border-color: alpha(@hot, 0.35);
+}
+
+deck button.hotcue.set {
+	background: @hot;
+	border-color: @hot;
 	color: #1a0a12;
 }
+
+deck button.hotcue:nth-child(3).set { background: #ffd54f; border-color: #ffd54f; }
+deck button.hotcue:nth-child(4).set { background: #4dd0e1; border-color: #4dd0e1; }
+deck button.hotcue:nth-child(5).set { background: #ff7043; border-color: #ff7043; }
 
 button.loop-size {
 	min-width: 24px;
 	padding: 4px 5px;
+	color: @loop;
+	border-color: alpha(@loop, 0.35);
 }
 
 button.loop-toggle:checked {
-	background: #7bd88f;
+	background: @loop;
 	color: #0d1a12;
+	box-shadow: 0 0 8px alpha(@loop, 0.6);
 }
 
 button.bend {
@@ -174,31 +243,65 @@ button.bend {
 }
 
 button.kill {
-	min-width: 20px;
-	min-height: 20px;
-	padding: 0 6px;
-	font-size: 10px;
+	min-width: 14px;
+	min-height: 18px;
+	padding: 0 4px;
+	font-size: 9px;
 }
 
 button.kill:checked {
-	background: #e0463b;
+	background: @rec;
+	border-color: @rec;
 	color: #fff;
 }
 
 button.pfl:checked {
-	background: #4fc3f7;
+	background: #4dd0e1;
 	color: #06202b;
 }
 
-button.record:checked {
-	background: #e0463b;
-	color: #fff;
+button.xf-side {
+	font-size: 10px;
+	padding: 2px 4px;
+	min-height: 20px;
+	color: @dim;
 }
+
+button.record:checked {
+	background: @rec;
+	color: #fff;
+	box-shadow: 0 0 10px alpha(@rec, 0.7);
+}
+
+button.automix-toggle {
+	background: alpha(@key, 0.2);
+	border-color: alpha(@key, 0.6);
+	color: @key;
+	letter-spacing: 1px;
+}
+
+button.automix-toggle:checked {
+	background: @key;
+	color: #1b0f22;
+	box-shadow: 0 0 10px alpha(@key, 0.7);
+}
+
+button.queue-button {
+	color: @key;
+	border-color: alpha(@key, 0.5);
+}
+
+.automix-status {
+	color: @key;
+	font-weight: 600;
+}
+
+/* ---- scales ------------------------------------------------------ */
 
 scale.pitch-fader,
 scale.channel-fader {
-	min-width: 30px;
-	padding: 6px 4px;
+	min-width: 26px;
+	padding: 6px 0;
 }
 
 scale.crossfader {
@@ -206,8 +309,8 @@ scale.crossfader {
 }
 
 scale > trough {
-	background: #101215;
-	border: 1px solid #2a2e35;
+	background: #0e1013;
+	border: 1px solid @line;
 	border-radius: 4px;
 }
 
@@ -218,6 +321,7 @@ scale.channel-fader > trough {
 
 scale.crossfader > trough {
 	min-height: 10px;
+	background: linear-gradient(90deg, alpha(@deck-a, 0.5), #0e1013 45%, #0e1013 55%, alpha(@deck-b, 0.5));
 }
 
 /*
@@ -227,11 +331,11 @@ scale.crossfader > trough {
 scale > trough > slider,
 scale.vertical.marks-before:not(.marks-after) > trough > slider,
 scale.horizontal.marks-after:not(.marks-before) > trough > slider {
-	background-color: #cfd3d8;
-	background-image: none;
+	background-color: #d5d9df;
+	background-image: linear-gradient(180deg, #eef1f4, #b9c0c9);
 	border: 1px solid #5a606a;
 	border-radius: 3px;
-	box-shadow: none;
+	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
 }
 
 scale.pitch-fader > trough > slider,
@@ -259,60 +363,77 @@ scale > trough > fill {
 }
 
 scale marks mark indicator {
-	background: #8a919c;
+	background: @dim;
 }
 
+/* ---- lists ------------------------------------------------------- */
+
 notebook > header {
-	background: #16181c;
+	background: @bg;
 }
 
 notebook > header tab {
 	padding: 4px 16px;
-	color: #8a919c;
+	color: @dim;
 }
 
 notebook > header tab:checked {
-	color: #e6e6e6;
-	border-bottom: 2px solid #4fc3f7;
+	color: @fg;
+	border-bottom: 2px solid @deck-a;
 }
 
-columnview.data-table {
-	background: #101215;
-	color: #e6e6e6;
+columnview.data-table,
+listview.queue-list {
+	background: #0e1013;
+	color: @fg;
 }
 
 columnview.data-table > header > button {
-	background: #1c1f24;
+	background: @panel;
 	border: none;
-	border-bottom: 1px solid #2a2e35;
+	border-bottom: 1px solid @line;
 	border-radius: 0;
 	padding: 4px 8px;
 	font-weight: 600;
-	color: #8a919c;
+	color: @dim;
 }
 
-columnview.data-table > listview > row {
+columnview.data-table > listview > row,
+listview.queue-list > row {
 	padding: 1px 0;
 }
 
-columnview.data-table > listview > row:selected {
-	background: #27566b;
+columnview.data-table > listview > row:selected,
+listview.queue-list > row:selected {
+	background: alpha(@deck-a, 0.3);
 }
 
-columnview.data-table > listview > row:hover {
+columnview.data-table > listview > row:hover,
+listview.queue-list > row:hover {
 	background: #1f232a;
 }
 
-columnview.data-table cell {
+columnview.data-table cell,
+listview.queue-list > row > box {
 	padding: 3px 8px;
+}
+
+columnview.data-table cell label.played {
+	color: @dim;
+}
+
+.queue-number {
+	color: @key;
+	font-weight: 700;
+	font-family: monospace;
 }
 
 entry,
 searchbar entry {
-	background: #101215;
-	color: #e6e6e6;
-	border: 1px solid #2a2e35;
-	border-radius: 5px;
+	background: #0e1013;
+	color: @fg;
+	border: 1px solid @line;
+	border-radius: 6px;
 	min-height: 30px;
 }
 
@@ -322,34 +443,34 @@ searchbar entry {
 }
 
 .toast {
-	background: #2a2e35;
-	color: #e6e6e6;
-	border: 1px solid #4fc3f7;
+	background: @panel2;
+	color: @fg;
+	border: 1px solid @deck-a;
 	border-radius: 20px;
 	padding: 10px 20px;
 	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
 }
 
 .drag-label {
-	background: #27566b;
+	background: alpha(@deck-a, 0.6);
 	color: #fff;
 	padding: 6px 12px;
 	border-radius: 6px;
 }
 
 paned > separator {
-	background: #2a2e35;
+	background: @line;
 	min-height: 4px;
 }
 
 popover.menu {
-	background: #1c1f24;
-	color: #e6e6e6;
+	background: @panel;
+	color: @fg;
 }
 
 tooltip {
-	background: #2a2e35;
-	color: #e6e6e6;
+	background: @panel2;
+	color: @fg;
 	border-radius: 4px;
 }
 

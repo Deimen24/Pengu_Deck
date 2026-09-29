@@ -23,6 +23,9 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 void pd_media_view_set_filter(PdMediaView *v, const char *text);
 GtkWidget *pd_media_view_search_entry(PdMediaView *v);
 void pd_media_view_load_selected(PdMediaView *v, int idx);
+void pd_media_view_queue_selected(PdMediaView *v);
+/* A "+ Queue" button bound to this view. */
+GtkWidget *pd_media_view_queue_button(PdMediaView *v);
 guint pd_media_view_count(PdMediaView *v);
 
 G_END_DECLS

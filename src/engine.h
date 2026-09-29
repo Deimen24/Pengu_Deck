@@ -10,6 +10,8 @@
 
 #include "deck.h"
 
+#define ENGINE_DECKS	4	/* always rendered, the UI shows 2 to 4 */
+
 enum hp_mode {
 	HP_OFF,
 	HP_SPLIT,	/* left = master (mono), right = cue (mono) */
@@ -41,7 +43,7 @@ struct engine_opts {
 struct engine_priv;
 
 struct engine {
-	struct deck deck[2];
+	struct deck deck[ENGINE_DECKS];
 
 	/* shared, written by the gui */
 	_Atomic float xfader;		/* -1 = deck A .. 1 = deck B */
