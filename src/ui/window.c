@@ -302,7 +302,7 @@ static GtkWidget *build_header(PdWindow *w)
 	GtkWidget *hb = gtk_header_bar_new();
 	GtkWidget *menu_btn = gtk_menu_button_new();
 	GMenu *menu = g_menu_new();
-	GtkWidget *title = gtk_label_new("Pengu Deck");
+	GtkWidget *title = gtk_label_new("🐧  PENGU DECK");
 
 	gtk_widget_add_css_class(title, "title");
 	gtk_header_bar_set_title_widget(GTK_HEADER_BAR(hb), title);

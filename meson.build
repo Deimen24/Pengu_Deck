@@ -93,6 +93,7 @@ ui_src = files(
 	'src/ui/libview.c',
 	'src/ui/mediaview.c',
 	'src/ui/meter.c',
+	'src/ui/platter.c',
 	'src/ui/mixerview.c',
 	'src/ui/prefs.c',
 	'src/ui/queueview.c',

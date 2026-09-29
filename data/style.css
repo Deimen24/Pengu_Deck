@@ -1,43 +1,58 @@
-/* Pengu Deck - colourful club theme */
+/* Pengu Deck - pro dark theme */
 
-@define-color bg #14161a;
-@define-color panel #1c1f26;
-@define-color panel2 #22262e;
-@define-color line #2c313a;
-@define-color fg #eceff3;
-@define-color dim #8f98a6;
-@define-color deck-a #4fc3f7;
-@define-color deck-b #ff8a65;
-@define-color deck-c #7bd88f;
-@define-color deck-d #c792ea;
-@define-color play #43c26d;
-@define-color cue #ffa726;
-@define-color sync #4fc3f7;
-@define-color key #c792ea;
-@define-color loop #7bd88f;
-@define-color hot #ef5da8;
-@define-color rec #e0463b;
+@define-color bg #0d0f13;
+@define-color panel #151820;
+@define-color panel2 #1b1f28;
+@define-color raised #232834;
+@define-color line #2a303c;
+@define-color fg #eef1f5;
+@define-color dim #8b94a3;
+@define-color deck-a #38bdf8;
+@define-color deck-b #fb923c;
+@define-color deck-c #4ade80;
+@define-color deck-d #c084fc;
+@define-color play #22c55e;
+@define-color cue #f59e0b;
+@define-color sync #38bdf8;
+@define-color key #c084fc;
+@define-color loop #4ade80;
+@define-color hot #f472b6;
+@define-color rec #ef4444;
+
+* {
+	outline: none;
+}
 
 window {
 	background: @bg;
 	color: @fg;
+	font-family: "Inter", "Cantarell", "Noto Sans", sans-serif;
 }
 
 headerbar {
-	background: linear-gradient(90deg, #1b2a38, #1c1f26 40%, #2a1e2b);
+	background: linear-gradient(90deg, #12202c, #151820 35%, #151820 65%, #23172a);
 	border-bottom: 1px solid @line;
 	color: @fg;
+	min-height: 40px;
+	padding: 0 6px;
 }
 
 headerbar .title {
 	font-weight: 800;
-	letter-spacing: 2px;
-	color: @deck-a;
+	letter-spacing: 3px;
+	font-size: 13px;
+	color: @fg;
+}
+
+headerbar button {
+	min-height: 26px;
+	padding: 2px 8px;
 }
 
 button.deck-count {
 	min-width: 26px;
 	padding: 2px 8px;
+	border-radius: 0;
 }
 
 button.deck-count:checked {
@@ -50,55 +65,64 @@ button.deck-count:checked {
 deck {
 	background: @panel;
 	border: 1px solid @line;
-	border-radius: 10px;
-	padding: 8px;
+	border-radius: 12px;
+	padding: 10px;
 }
 
-deck.deck-a { border-top: 4px solid @deck-a; background: linear-gradient(180deg, alpha(@deck-a, 0.10), @panel 140px); }
-deck.deck-b { border-top: 4px solid @deck-b; background: linear-gradient(180deg, alpha(@deck-b, 0.10), @panel 140px); }
-deck.deck-c { border-top: 4px solid @deck-c; background: linear-gradient(180deg, alpha(@deck-c, 0.10), @panel 140px); }
-deck.deck-d { border-top: 4px solid @deck-d; background: linear-gradient(180deg, alpha(@deck-d, 0.10), @panel 140px); }
+deck.deck-a { background: linear-gradient(160deg, alpha(@deck-a, 0.14), @panel 45%); }
+deck.deck-b { background: linear-gradient(200deg, alpha(@deck-b, 0.14), @panel 45%); }
+deck.deck-c { background: linear-gradient(160deg, alpha(@deck-c, 0.14), @panel 45%); }
+deck.deck-d { background: linear-gradient(200deg, alpha(@deck-d, 0.14), @panel 45%); }
 
 .deck-badge {
-	font-size: 22px;
-	font-weight: 800;
-	padding: 4px 12px;
-	border-radius: 8px;
+	font-size: 20px;
+	font-weight: 900;
+	min-width: 30px;
+	padding: 6px 10px;
+	border-radius: 10px;
 	color: @bg;
 }
 
-label.deck-badge.deck-a { background: @deck-a; }
-label.deck-badge.deck-b { background: @deck-b; }
-label.deck-badge.deck-c { background: @deck-c; }
-label.deck-badge.deck-d { background: @deck-d; }
+label.deck-badge.deck-a { background: @deck-a; box-shadow: 0 0 14px alpha(@deck-a, 0.6); }
+label.deck-badge.deck-b { background: @deck-b; box-shadow: 0 0 14px alpha(@deck-b, 0.6); }
+label.deck-badge.deck-c { background: @deck-c; box-shadow: 0 0 14px alpha(@deck-c, 0.6); }
+label.deck-badge.deck-d { background: @deck-d; box-shadow: 0 0 14px alpha(@deck-d, 0.6); }
 
 .track-title {
-	font-size: 15px;
+	font-size: 16px;
 	font-weight: 700;
+}
+
+.readout {
+	font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace;
+	background: #0a0c10;
+	border: 1px solid @line;
+	border-radius: 6px;
+	padding: 2px 8px;
 }
 
 .bpm {
-	font-size: 20px;
+	font-size: 19px;
 	font-weight: 700;
-	font-family: monospace;
-	color: #ffd54f;
+	color: #fde047;
 }
 
 .time {
-	font-size: 15px;
-	font-family: monospace;
+	font-size: 14px;
+	color: #a5f3fc;
 }
 
 .mono {
-	font-family: monospace;
+	font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace;
 }
 
 .section-label {
-	font-size: 10px;
-	font-weight: 700;
-	letter-spacing: 1.5px;
+	font-size: 9px;
+	font-weight: 800;
+	letter-spacing: 2px;
 	color: @dim;
 	margin: 0 4px;
+	min-width: 34px;
 }
 
 .dim-label {
@@ -106,16 +130,21 @@ label.deck-badge.deck-d { background: @deck-d; }
 }
 
 .error {
-	color: #ff6b5e;
+	color: #fca5a5;
 }
 
 waveform {
-	border-radius: 6px;
-	background: #0e1013;
+	border-radius: 8px;
+	background: #0a0c10;
+	border: 1px solid @line;
 }
 
 meter {
-	border-radius: 2px;
+	border-radius: 3px;
+}
+
+platter {
+	margin: 0 2px;
 }
 
 /* ---- mixer ------------------------------------------------------- */
@@ -123,20 +152,21 @@ meter {
 mixer {
 	background: @panel;
 	border: 1px solid @line;
-	border-radius: 10px;
+	border-radius: 12px;
 	padding: 6px;
 }
 
 .strip {
 	padding: 2px 3px;
-	border-radius: 8px;
+	border-radius: 10px;
 	background: @panel2;
+	border: 1px solid @line;
 }
 
-.strip.deck-a { box-shadow: inset 0 3px 0 @deck-a; }
-.strip.deck-b { box-shadow: inset 0 3px 0 @deck-b; }
-.strip.deck-c { box-shadow: inset 0 3px 0 @deck-c; }
-.strip.deck-d { box-shadow: inset 0 3px 0 @deck-d; }
+.strip.deck-a { border-top: 3px solid @deck-a; }
+.strip.deck-b { border-top: 3px solid @deck-b; }
+.strip.deck-c { border-top: 3px solid @deck-c; }
+.strip.deck-d { border-top: 3px solid @deck-d; }
 
 .strip.deck-a .deck-letter { color: @deck-a; }
 .strip.deck-b .deck-letter { color: @deck-b; }
@@ -151,55 +181,58 @@ mixer {
 /* ---- buttons ----------------------------------------------------- */
 
 button {
-	background: #2a2f38;
+	background: @raised;
 	color: @fg;
-	border: 1px solid #3a4150;
-	border-radius: 6px;
+	border: 1px solid #333a48;
+	border-radius: 7px;
 	padding: 4px 7px;
 	min-height: 28px;
-	box-shadow: none;
+	box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
 	text-shadow: none;
-	font-weight: 600;
+	font-weight: 700;
+	font-size: 12px;
+	transition: background 80ms, box-shadow 120ms;
 }
 
 button:hover {
-	background: #353b46;
+	background: #2b3140;
 }
 
 button:active,
 button:checked {
-	background: #414857;
+	background: #363d4d;
 }
 
 button.play-button {
-	min-width: 64px;
+	min-width: 68px;
 	font-size: 18px;
-	background: alpha(@play, 0.25);
+	background: alpha(@play, 0.18);
 	border-color: alpha(@play, 0.6);
 	color: @play;
 }
 
 button.play-button:checked {
 	background: @play;
-	color: #0d1a12;
-	box-shadow: 0 0 10px alpha(@play, 0.6);
+	color: #052e16;
+	box-shadow: 0 0 16px alpha(@play, 0.7);
 }
 
 button.cue-button {
-	min-width: 56px;
-	background: alpha(@cue, 0.22);
+	min-width: 60px;
+	background: alpha(@cue, 0.18);
 	border-color: alpha(@cue, 0.6);
 	color: @cue;
 }
 
 button.cue-button:active {
 	background: @cue;
-	color: #1a1200;
+	color: #1c1200;
+	box-shadow: 0 0 16px alpha(@cue, 0.7);
 }
 
 button.sync-button {
-	background: alpha(@sync, 0.18);
-	border-color: alpha(@sync, 0.6);
+	background: alpha(@sync, 0.14);
+	border-color: alpha(@sync, 0.55);
 	color: @sync;
 }
 
@@ -208,33 +241,58 @@ button.sync-button:active {
 	color: #06202b;
 }
 
-deck button.hotcue {
-	min-width: 30px;
+deck button.pad {
+	min-width: 34px;
+	min-height: 30px;
+	border-radius: 6px;
 	color: @dim;
-	border-color: alpha(@hot, 0.35);
+	background: #1a1e27;
+	border: 1px solid alpha(@hot, 0.45);
+	box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.4);
 }
 
-deck button.hotcue.set {
+deck button.pad.set {
 	background: @hot;
 	border-color: @hot;
-	color: #1a0a12;
+	color: #2a0a1c;
+	box-shadow: 0 0 12px alpha(@hot, 0.7);
 }
 
-deck button.hotcue:nth-child(3).set { background: #ffd54f; border-color: #ffd54f; }
-deck button.hotcue:nth-child(4).set { background: #4dd0e1; border-color: #4dd0e1; }
-deck button.hotcue:nth-child(5).set { background: #ff7043; border-color: #ff7043; }
+deck button.pad:nth-child(3) { border-color: alpha(#fde047, 0.45); }
+deck button.pad:nth-child(3).set { background: #fde047; border-color: #fde047; box-shadow: 0 0 12px alpha(#fde047, 0.7); }
+deck button.pad:nth-child(4) { border-color: alpha(#22d3ee, 0.45); }
+deck button.pad:nth-child(4).set { background: #22d3ee; border-color: #22d3ee; box-shadow: 0 0 12px alpha(#22d3ee, 0.7); }
+deck button.pad:nth-child(5) { border-color: alpha(#fb7185, 0.45); }
+deck button.pad:nth-child(5).set { background: #fb7185; border-color: #fb7185; box-shadow: 0 0 12px alpha(#fb7185, 0.7); }
 
 button.loop-size {
-	min-width: 24px;
-	padding: 4px 5px;
+	min-width: 26px;
+	padding: 4px 6px;
 	color: @loop;
-	border-color: alpha(@loop, 0.35);
+	background: #1a1e27;
+	border-color: alpha(@loop, 0.4);
+}
+
+.linked > button {
+	border-radius: 0;
+	margin-left: -1px;
+}
+
+.linked > button:first-child {
+	border-top-left-radius: 7px;
+	border-bottom-left-radius: 7px;
+	margin-left: 0;
+}
+
+.linked > button:last-child {
+	border-top-right-radius: 7px;
+	border-bottom-right-radius: 7px;
 }
 
 button.loop-toggle:checked {
 	background: @loop;
-	color: #0d1a12;
-	box-shadow: 0 0 8px alpha(@loop, 0.6);
+	color: #052e16;
+	box-shadow: 0 0 12px alpha(@loop, 0.7);
 }
 
 button.bend {
@@ -256,8 +314,9 @@ button.kill:checked {
 }
 
 button.pfl:checked {
-	background: #4dd0e1;
+	background: #22d3ee;
 	color: #06202b;
+	box-shadow: 0 0 10px alpha(#22d3ee, 0.6);
 }
 
 button.xf-side {
@@ -270,11 +329,11 @@ button.xf-side {
 button.record:checked {
 	background: @rec;
 	color: #fff;
-	box-shadow: 0 0 10px alpha(@rec, 0.7);
+	box-shadow: 0 0 14px alpha(@rec, 0.8);
 }
 
 button.automix-toggle {
-	background: alpha(@key, 0.2);
+	background: alpha(@key, 0.18);
 	border-color: alpha(@key, 0.6);
 	color: @key;
 	letter-spacing: 1px;
@@ -283,7 +342,7 @@ button.automix-toggle {
 button.automix-toggle:checked {
 	background: @key;
 	color: #1b0f22;
-	box-shadow: 0 0 10px alpha(@key, 0.7);
+	box-shadow: 0 0 14px alpha(@key, 0.7);
 }
 
 button.queue-button {
@@ -309,7 +368,7 @@ scale.crossfader {
 }
 
 scale > trough {
-	background: #0e1013;
+	background: #0a0c10;
 	border: 1px solid @line;
 	border-radius: 4px;
 }
@@ -321,7 +380,7 @@ scale.channel-fader > trough {
 
 scale.crossfader > trough {
 	min-height: 10px;
-	background: linear-gradient(90deg, alpha(@deck-a, 0.5), #0e1013 45%, #0e1013 55%, alpha(@deck-b, 0.5));
+	background: linear-gradient(90deg, alpha(@deck-a, 0.6), #0a0c10 45%, #0a0c10 55%, alpha(@deck-b, 0.6));
 }
 
 /*
@@ -332,10 +391,10 @@ scale > trough > slider,
 scale.vertical.marks-before:not(.marks-after) > trough > slider,
 scale.horizontal.marks-after:not(.marks-before) > trough > slider {
 	background-color: #d5d9df;
-	background-image: linear-gradient(180deg, #eef1f4, #b9c0c9);
-	border: 1px solid #5a606a;
-	border-radius: 3px;
-	box-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+	background-image: linear-gradient(180deg, #f3f5f8, #aeb6c2);
+	border: 1px solid #4b5260;
+	border-radius: 4px;
+	box-shadow: 0 2px 4px rgba(0, 0, 0, 0.7);
 }
 
 scale.pitch-fader > trough > slider,
@@ -343,14 +402,16 @@ scale.channel-fader > trough > slider,
 scale.pitch-fader.vertical.marks-before:not(.marks-after) > trough > slider {
 	margin: 0 -9px;
 	min-width: 26px;
-	min-height: 16px;
+	min-height: 18px;
+	background-image: linear-gradient(180deg, #f3f5f8 45%, #333a48 45%, #333a48 55%, #aeb6c2 55%);
 }
 
 scale.crossfader > trough > slider,
 scale.crossfader.horizontal.marks-after:not(.marks-before) > trough > slider {
 	margin: -8px 0;
-	min-width: 22px;
+	min-width: 24px;
 	min-height: 26px;
+	background-image: linear-gradient(90deg, #f3f5f8 45%, #333a48 45%, #333a48 55%, #aeb6c2 55%);
 }
 
 scale > trough > highlight,
@@ -370,11 +431,14 @@ scale marks mark indicator {
 
 notebook > header {
 	background: @bg;
+	border-bottom: 1px solid @line;
 }
 
 notebook > header tab {
-	padding: 4px 16px;
+	padding: 4px 18px;
 	color: @dim;
+	font-weight: 700;
+	letter-spacing: 1px;
 }
 
 notebook > header tab:checked {
@@ -384,7 +448,7 @@ notebook > header tab:checked {
 
 columnview.data-table,
 listview.queue-list {
-	background: #0e1013;
+	background: #0a0c10;
 	color: @fg;
 }
 
@@ -394,7 +458,9 @@ columnview.data-table > header > button {
 	border-bottom: 1px solid @line;
 	border-radius: 0;
 	padding: 4px 8px;
-	font-weight: 600;
+	font-weight: 700;
+	font-size: 11px;
+	letter-spacing: 1px;
 	color: @dim;
 }
 
@@ -410,12 +476,12 @@ listview.queue-list > row:selected {
 
 columnview.data-table > listview > row:hover,
 listview.queue-list > row:hover {
-	background: #1f232a;
+	background: #1a1e27;
 }
 
 columnview.data-table cell,
 listview.queue-list > row > box {
-	padding: 3px 8px;
+	padding: 4px 8px;
 }
 
 columnview.data-table cell label.played {
@@ -430,11 +496,15 @@ columnview.data-table cell label.played {
 
 entry,
 searchbar entry {
-	background: #0e1013;
+	background: #0a0c10;
 	color: @fg;
 	border: 1px solid @line;
-	border-radius: 6px;
+	border-radius: 8px;
 	min-height: 30px;
+}
+
+entry:focus-within {
+	border-color: @deck-a;
 }
 
 .placeholder {
@@ -443,12 +513,12 @@ searchbar entry {
 }
 
 .toast {
-	background: @panel2;
+	background: @raised;
 	color: @fg;
 	border: 1px solid @deck-a;
 	border-radius: 20px;
 	padding: 10px 20px;
-	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
 }
 
 .drag-label {
@@ -463,15 +533,18 @@ paned > separator {
 	min-height: 4px;
 }
 
-popover.menu {
-	background: @panel;
+popover.menu,
+popover.menu > contents {
+	background: @panel2;
 	color: @fg;
+	border: 1px solid @line;
+	border-radius: 8px;
 }
 
 tooltip {
-	background: @panel2;
+	background: @raised;
 	color: @fg;
-	border-radius: 4px;
+	border-radius: 6px;
 }
 
 dropdown button,

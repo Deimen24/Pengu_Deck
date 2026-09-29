@@ -6,7 +6,10 @@
 
 #include "cuestore.h"
 #include "deckview.h"
+#include "platter.h"
 #include "waveform.h"
+
+#define PLATTER_SIZE	100
 
 #define BEND_AMOUNT	0.04f
 
@@ -366,7 +369,9 @@ static GtkWidget *build_header(PdDeckView *v)
 	gtk_widget_add_css_class(v->title, "track-title");
 	gtk_widget_add_css_class(v->artist, "dim-label");
 	gtk_widget_add_css_class(v->bpm, "bpm");
+	gtk_widget_add_css_class(v->bpm, "readout");
 	gtk_widget_add_css_class(v->time, "time");
+	gtk_widget_add_css_class(v->time, "readout");
 	gtk_widget_add_css_class(v->status, "dim-label");
 	gtk_label_set_xalign(GTK_LABEL(v->title), 0.0f);
 	gtk_label_set_xalign(GTK_LABEL(v->artist), 0.0f);
@@ -395,27 +400,33 @@ static GtkWidget *build_loops(PdDeckView *v)
 	} sizes[] = {
 		{ "½", 2 }, { "1", 4 }, { "2", 8 }, { "4", 16 }, { "8", 32 },
 	};
-	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	GtkWidget *group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	GtkWidget *b;
 	size_t i;
 
 	b = gtk_label_new("LOOP");
 	gtk_widget_add_css_class(b, "section-label");
 	gtk_box_append(GTK_BOX(box), b);
+	gtk_widget_add_css_class(group, "linked");
 	for (i = 0; i < G_N_ELEMENTS(sizes); i++) {
 		b = button(sizes[i].label, "loop-size");
 		g_object_set_data(G_OBJECT(b), "view", v);
 		g_signal_connect(b, "clicked", G_CALLBACK(on_loop_beats),
 				 GINT_TO_POINTER(sizes[i].quarter_beats));
-		gtk_box_append(GTK_BOX(box), b);
+		gtk_box_append(GTK_BOX(group), b);
 	}
-	b = button("½×", NULL);
-	g_signal_connect(b, "clicked", G_CALLBACK(on_loop_half), v);
-	gtk_box_append(GTK_BOX(box), b);
-	b = button("2×", NULL);
-	g_signal_connect(b, "clicked", G_CALLBACK(on_loop_double), v);
-	gtk_box_append(GTK_BOX(box), b);
+	gtk_box_append(GTK_BOX(box), group);
 
+	group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+	gtk_widget_add_css_class(group, "linked");
+	b = button("½×", "loop-size");
+	g_signal_connect(b, "clicked", G_CALLBACK(on_loop_half), v);
+	gtk_box_append(GTK_BOX(group), b);
+	b = button("2×", "loop-size");
+	g_signal_connect(b, "clicked", G_CALLBACK(on_loop_double), v);
+	gtk_box_append(GTK_BOX(group), b);
+	gtk_box_append(GTK_BOX(box), group);
 	return box;
 }
 
@@ -434,6 +445,7 @@ static GtkWidget *build_hotcues(PdDeckView *v)
 
 		g_snprintf(label, sizeof(label), "%d", i + 1);
 		b = button(label, "hotcue");
+		gtk_widget_add_css_class(b, "pad");
 		gtk_widget_set_tooltip_text(b, "Click: set or jump, "
 					    "right click: clear");
 		gtk_gesture_single_set_button(GTK_GESTURE_SINGLE(g), 0);
@@ -598,9 +610,20 @@ GtkWidget *pd_deck_view_new(struct app *app, int idx)
 	gtk_box_append(GTK_BOX(main), v->wave);
 	gtk_box_append(GTK_BOX(main), v->overview);
 
-	gtk_box_append(GTK_BOX(main), build_transport(v));
-	gtk_box_append(GTK_BOX(main), build_hotcues(v));
-	gtk_box_append(GTK_BOX(main), build_loops(v));
+	{
+		GtkWidget *bottom = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+		GtkWidget *pads = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+
+		gtk_box_append(GTK_BOX(pads), build_transport(v));
+		gtk_box_append(GTK_BOX(pads), build_hotcues(v));
+		gtk_box_append(GTK_BOX(pads), build_loops(v));
+		gtk_widget_set_valign(pads, GTK_ALIGN_CENTER);
+		gtk_box_append(GTK_BOX(bottom),
+			       pd_platter_new(v->deck, app_deck_color(idx),
+					      PLATTER_SIZE));
+		gtk_box_append(GTK_BOX(bottom), pads);
+		gtk_box_append(GTK_BOX(main), bottom);
+	}
 
 	gtk_widget_set_hexpand(main, TRUE);
 	gtk_box_append(GTK_BOX(v), main);
