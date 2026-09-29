@@ -515,7 +515,7 @@ static void build_audio(struct prefs *p, GtkWidget *nb)
 	row(g, 8, "Talkover", p->talkover);
 	fill_mic_devices(p);
 
-	l = gtk_label_new("On CachyOS / Arch with PipeWire the automatic "
+	l = gtk_label_new("With PipeWire the automatic "
 			  "backend uses pipewire-pulse. For the lowest "
 			  "latency pick JACK and run with pipewire-jack, or "
 			  "ALSA with a direct hw: device.");
