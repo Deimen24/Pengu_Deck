@@ -1,0 +1,115 @@
+name: Release
+
+# Push a tag like v0.1.0 to build the packages for every distribution
+# and attach them to a GitHub Release.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  arch:
+    name: Arch Linux package
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed git meson ninja pkgconf gtk4 \
+            glib2 json-glib curl ffmpeg rubberband libpulse alsa-lib \
+            webkitgtk-6.0 desktop-file-utils
+      - uses: actions/checkout@v4
+      - name: Package
+        run: |
+          useradd -m builder
+          chown -R builder .
+          su builder -c 'cd packaging/arch && makepkg -f --noconfirm'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arch
+          path: packaging/arch/*.pkg.tar.*
+
+  deb:
+    name: Debian package
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends build-essential \
+            meson ninja-build pkgconf libgtk-4-dev libglib2.0-dev \
+            libjson-glib-dev libcurl4-openssl-dev libavformat-dev \
+            libavcodec-dev libavutil-dev libswresample-dev \
+            librubberband-dev libpulse-dev libasound2-dev \
+            libwebkitgtk-6.0-dev desktop-file-utils debhelper devscripts
+      - name: Package
+        run: |
+          dpkg-buildpackage -us -uc -b
+          mkdir -p dist && mv ../pengu-deck_*.deb dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: deb
+          path: dist/*.deb
+
+  rpm:
+    name: Fedora package
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y gcc meson ninja-build pkgconf gtk4-devel \
+            glib2-devel json-glib-devel libcurl-devel rubberband-devel \
+            pulseaudio-libs-devel alsa-lib-devel webkitgtk6.0-devel \
+            desktop-file-utils rpm-build git ffmpeg-free-devel
+      - uses: actions/checkout@v4
+      - name: Package
+        run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
+          mkdir -p ~/rpmbuild/SOURCES
+          git archive --prefix=Pengu_Deck-0.1.0/ -o ~/rpmbuild/SOURCES/Pengu_Deck-0.1.0.tar.gz HEAD
+          rpmbuild -bb packaging/fedora/pengu-deck.spec
+          mkdir -p dist && cp ~/rpmbuild/RPMS/*/*.rpm dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rpm
+          path: dist/*.rpm
+
+  flatpak:
+    name: Flatpak bundle
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-47
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
+        with:
+          bundle: pengu-deck.flatpak
+          manifest-path: packaging/flatpak/io.github.deimen24.PenguDeck.yml
+          cache-key: flatpak-builder-${{ github.sha }}
+          upload-artifact: true
+
+  release:
+    name: Publish release
+    needs: [arch, deb, rpm, flatpak]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: packages
+      - name: List
+        run: find packages -type f
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: Pengu Deck ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            packages/arch/*
+            packages/deb/*
+            packages/rpm/*
+            packages/*/*.flatpak
