@@ -495,3 +495,36 @@ char *sc_detect_client_id(GError **err)
 			    "Could not find a client ID on soundcloud.com");
 	return id;
 }
+
+static char *first_match(const char *pattern, const char *text)
+{
+	GRegex *re = g_regex_new(pattern, G_REGEX_CASELESS, 0, NULL);
+	GMatchInfo *mi = NULL;
+	char *hit = NULL;
+
+	if (re && g_regex_match(re, text, 0, &mi))
+		hit = g_match_info_fetch(mi, 1);
+	g_match_info_free(mi);
+	if (re)
+		g_regex_unref(re);
+	return hit;
+}
+
+gboolean sc_parse_session(const char *text, char **token, char **datadome)
+{
+	*token = NULL;
+	*datadome = NULL;
+	if (!text)
+		return FALSE;
+	*token = first_match("oauth_token[=:\\s\"']+([0-9]-[0-9]+-[0-9]+-"
+			     "[A-Za-z0-9]+)", text);
+	if (!*token)
+		*token = first_match("Authorization:\\s*OAuth\\s+([0-9]-"
+				     "[0-9]+-[0-9]+-[A-Za-z0-9]+)", text);
+	if (!*token)
+		*token = first_match("(?:^|[^A-Za-z0-9-])([0-9]-[0-9]+-[0-9]+-"
+				     "[A-Za-z0-9]+)", text);
+	*datadome = first_match("datadome[=:\\s\"']+([A-Za-z0-9_~.-]{20,})",
+				text);
+	return *token != NULL;
+}

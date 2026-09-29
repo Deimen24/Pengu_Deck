@@ -909,3 +909,17 @@ button.mic:checked {
 	color: #14200a;
 	box-shadow: 0 0 12px alpha(#a3e635, 0.7);
 }
+
+/* ---- SoundCloud login paste box ---------------------------------- */
+
+textview.paste-area,
+textview.paste-area > text {
+	background: #0a0c10;
+	color: @fg;
+}
+
+textview.paste-area {
+	border: 1px solid @line;
+	border-radius: 8px;
+	padding: 6px;
+}

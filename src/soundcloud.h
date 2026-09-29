@@ -41,6 +41,14 @@ char *sc_stream_url(const struct sc_auth *a, PdMediaItem *item,
 /* Scrape the public client id the SoundCloud web player uses. */
 char *sc_detect_client_id(GError **err);
 
+/*
+ * Pick the login token and the bot protection cookie out of whatever
+ * the user pasted: a cookie line, a "Copy as cURL" from the browser's
+ * developer tools, or the bare token.  Returns TRUE when a token was
+ * found; @datadome may still be NULL.
+ */
+gboolean sc_parse_session(const char *text, char **token, char **datadome);
+
 /* Exposed for the tests. */
 GPtrArray *sc_parse_tracks(const char *json, GError **err);
 

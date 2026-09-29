@@ -125,16 +125,21 @@ Pro DJ Link over Ethernet is proprietary and not supported.
 ## SoundCloud
 
 Pengu Deck uses the same `api-v2` endpoints as the web player; the
-client ID is detected at start. Press **Log in to SoundCloud** and sign
-in in the embedded browser. Then search, or paste a track, set or
-artist link. Streams start within a second and are cached to
-`~/.cache/pengu-deck/soundcloud/` while playing; cached tracks show ⬇
-and the cache can be cleared in Preferences. Preview-only tracks play
-as 30 s snippets and are marked "(preview)".
+client ID is detected at start. Press **Log in to SoundCloud**: your
+browser opens soundcloud.com, you sign in there, then copy the session
+into the app. In the browser press F12, open the Network tab, click any
+request to api-v2.soundcloud.com, right click → Copy → Copy as cURL,
+and paste it into the login window; the app picks the token and the
+bot protection cookie out of it. The cookies `oauth_token` and
+`datadome` from the Storage tab, or the bare token, work as well.
+An embedded browser is offered too, but SoundCloud's bot protection
+refuses it on many networks.
 
-While a deck plays, a recording runs or the stream is live the app asks
-the desktop session not to suspend or blank the screen; the inhibit is
-lifted as soon as everything is stopped.
+Then search, or paste a track, set or artist link. Streams start
+within a second and are cached to `~/.cache/pengu-deck/soundcloud/`
+while playing; cached tracks show ⬇ and the cache can be cleared in
+Preferences. Preview-only tracks play as 30 s snippets and are marked
+"(preview)".
 
 ## Recording, broadcasting, microphone
 

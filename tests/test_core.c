@@ -591,6 +591,38 @@ static void test_sc_parse(void)
 	g_clear_error(&err);
 }
 
+static void test_sc_session(void)
+{
+	char *tok, *dd;
+
+	/* a cookie header line from the developer tools */
+	g_assert_true(sc_parse_session("sc_anonymous_id=1; oauth_token="
+		"2-306106-1234567-AbCdEf1234; datadome=ABCDEFGHIJKLMNOPQRSTUV"
+		"WXYZ0123456789~abc_def", &tok, &dd));
+	g_assert_cmpstr(tok, ==, "2-306106-1234567-AbCdEf1234");
+	g_assert_cmpstr(dd, ==, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789~abc_def");
+	g_free(tok);
+	g_free(dd);
+
+	/* "Copy as cURL" carries the token in the Authorization header */
+	g_assert_true(sc_parse_session("curl 'https://api-v2.soundcloud.com/"
+		"me' -H 'Authorization: OAuth 2-1-2-XyZ' -H 'Cookie: "
+		"datadome=\"QWERTYUIOPASDFGHJKLZXCVBNM12\"'", &tok, &dd));
+	g_assert_cmpstr(tok, ==, "2-1-2-XyZ");
+	g_assert_cmpstr(dd, ==, "QWERTYUIOPASDFGHJKLZXCVBNM12");
+	g_free(tok);
+	g_free(dd);
+
+	/* just the token */
+	g_assert_true(sc_parse_session("  2-9-9-abc \n", &tok, &dd));
+	g_assert_cmpstr(tok, ==, "2-9-9-abc");
+	g_assert_null(dd);
+	g_free(tok);
+
+	g_assert_false(sc_parse_session("nothing here", &tok, &dd));
+	g_assert_null(tok);
+}
+
 int main(int argc, char **argv)
 {
 	g_test_init(&argc, &argv, NULL);
@@ -612,5 +644,6 @@ int main(int argc, char **argv)
 	g_test_add_func("/deck/sync", test_sync);
 	g_test_add_func("/decoder/wav", test_decoder);
 	g_test_add_func("/soundcloud/parse", test_sc_parse);
+	g_test_add_func("/soundcloud/session", test_sc_session);
 	return g_test_run();
 }
