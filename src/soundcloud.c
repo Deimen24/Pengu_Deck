@@ -726,45 +726,82 @@ GPtrArray *sc_resolve(const char *link, GError **err)
 	return res;
 }
 
-/* One playlist object: its tracks, labelled with the playlist title. */
-static void add_playlist(GPtrArray *out, JsonObject *pl, GError **err)
+/* ---- playlists --------------------------------------------------- */
+
+G_DEFINE_FINAL_TYPE(PdScPlaylist, pd_sc_playlist, G_TYPE_OBJECT)
+
+static void pd_sc_playlist_finalize(GObject *obj)
 {
-	const char *title = str_member(pl, "title");
-	const char *urn = str_member(pl, "urn");
-	JsonArray *arr = arr_member(pl, "tracks");
-	GPtrArray *tracks = NULL;
+	PdScPlaylist *p = PD_SC_PLAYLIST(obj);
+
+	g_free(p->title);
+	g_free(p->urn);
+	g_free(p->user);
+	g_free(p->permalink);
+	if (p->tracks)
+		g_ptr_array_unref(p->tracks);
+	G_OBJECT_CLASS(pd_sc_playlist_parent_class)->finalize(obj);
+}
+
+static void pd_sc_playlist_class_init(PdScPlaylistClass *klass)
+{
+	G_OBJECT_CLASS(klass)->finalize = pd_sc_playlist_finalize;
+}
+
+static void pd_sc_playlist_init(PdScPlaylist *p)
+{
+}
+
+/* Label the tracks with the playlist and drop what cannot be played. */
+static GPtrArray *label_tracks(PdScPlaylist *p, GPtrArray *tracks)
+{
+	GPtrArray *out = g_ptr_array_new_with_free_func(g_object_unref);
 	guint i;
 
-	if (arr) {
-		tracks = g_ptr_array_new_with_free_func(g_object_unref);
-		for (i = 0; i < json_array_get_length(arr); i++)
-			add_track_node(tracks, json_array_get_element(arr, i));
-	} else if (urn) {
-		char *url = g_strdup_printf("%s/playlists/%s/tracks?%s"
-					    "&linked_partitioning=true",
-					    api_base(), urn, access_filter());
-
-		tracks = fetch_tracks(url, err);
-		g_free(url);
-	}
 	for (i = 0; tracks && i < tracks->len; i++) {
 		PdMediaItem *m = tracks->pdata[i];
 
-		if (full_only && m->preview)
+		if (!m->location || (full_only && m->preview))
 			continue;
-		if (title && *title) {
+		if (p->title && *p->title) {
 			g_free(m->album);
-			m->album = g_strdup(title);
+			m->album = g_strdup(p->title);
 		}
 		g_ptr_array_add(out, g_object_ref(m));
 	}
-	if (tracks)
-		g_ptr_array_unref(tracks);
+	return out;
+}
+
+static PdScPlaylist *parse_playlist(JsonObject *o)
+{
+	PdScPlaylist *p;
+	JsonArray *arr;
+	guint i;
+
+	if (!o || !str_member(o, "title"))
+		return NULL;
+	p = g_object_new(PD_TYPE_SC_PLAYLIST, NULL);
+	p->title = g_strdup(str_member(o, "title"));
+	p->urn = g_strdup(str_member(o, "urn"));
+	p->user = g_strdup(str_member(obj_member(o, "user"), "username"));
+	p->permalink = g_strdup(str_member(o, "permalink_url"));
+	p->count = (guint)int_member(o, "track_count");
+	arr = arr_member(o, "tracks");
+	if (arr) {
+		p->tracks = g_ptr_array_new_with_free_func(g_object_unref);
+		for (i = 0; i < json_array_get_length(arr); i++)
+			add_track_node(p->tracks,
+				       json_array_get_element(arr, i));
+		p->all = p->tracks->len;
+		if (!p->count)
+			p->count = p->all;
+	}
+	return p;
 }
 
 /* Every playlist behind @first_url, page by page. */
 static void fetch_playlists(GPtrArray *out, const char *first_url,
-			    GError **err)
+			    gboolean liked, GError **err)
 {
 	char *url = g_strdup(first_url);
 	int pages = 0;
@@ -791,10 +828,13 @@ static void fetch_playlists(GPtrArray *out, const char *first_url,
 					 "collection");
 		for (i = 0; arr && i < json_array_get_length(arr); i++) {
 			JsonNode *n = json_array_get_element(arr, i);
+			PdScPlaylist *p = JSON_NODE_HOLDS_OBJECT(n) ?
+				parse_playlist(json_node_get_object(n)) : NULL;
 
-			if (JSON_NODE_HOLDS_OBJECT(n))
-				add_playlist(out, json_node_get_object(n),
-					     NULL);
+			if (p) {
+				p->liked = liked;
+				g_ptr_array_add(out, p);
+			}
 		}
 		if (JSON_NODE_HOLDS_OBJECT(root))
 			next = str_member(json_node_get_object(root),
@@ -820,7 +860,7 @@ GPtrArray *sc_playlists(GError **err)
 	/* own playlists come with their tracks, liked ones are fetched */
 	url = g_strdup_printf("%s/me/playlists?show_tracks=true&limit=50"
 			      "&linked_partitioning=true", api_base());
-	fetch_playlists(out, url, err);
+	fetch_playlists(out, url, FALSE, err);
 	g_free(url);
 	if (out->len == 0 && err && *err) {
 		g_ptr_array_unref(out);
@@ -829,9 +869,31 @@ GPtrArray *sc_playlists(GError **err)
 	g_clear_error(err);
 	url = g_strdup_printf("%s/me/likes/playlists?limit=50"
 			      "&linked_partitioning=true", api_base());
-	fetch_playlists(out, url, NULL);
+	fetch_playlists(out, url, TRUE, NULL);
 	g_free(url);
 	return out;
+}
+
+GPtrArray *sc_playlist_tracks(PdScPlaylist *p, GError **err)
+{
+	char *url;
+
+	if (p->tracks)
+		return label_tracks(p, p->tracks);
+	if (!p->urn) {
+		g_set_error_literal(err, SC_ERROR, SC_ERROR_NOT_FOUND,
+				    "This playlist has no address");
+		return NULL;
+	}
+	url = g_strdup_printf("%s/playlists/%s/tracks?access=playable,"
+			      "preview,blocked&linked_partitioning=true",
+			      api_base(), p->urn);
+	p->tracks = fetch_tracks(url, err);
+	g_free(url);
+	if (!p->tracks)
+		return NULL;
+	p->all = p->tracks->len;
+	return label_tracks(p, p->tracks);
 }
 
 GPtrArray *sc_likes(GError **err)

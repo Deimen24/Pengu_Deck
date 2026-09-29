@@ -80,8 +80,32 @@ void sc_set_full_only(gboolean on);
 GPtrArray *sc_search(const char *query, GError **err);
 GPtrArray *sc_resolve(const char *url, GError **err);
 GPtrArray *sc_likes(GError **err);
-/* Tracks of all the user's own and liked playlists, album = playlist. */
+
+/* One of the user's playlists (sets). */
+#define PD_TYPE_SC_PLAYLIST (pd_sc_playlist_get_type())
+G_DECLARE_FINAL_TYPE(PdScPlaylist, pd_sc_playlist, PD, SC_PLAYLIST, GObject)
+
+struct _PdScPlaylist {
+	GObject parent;
+	char *title;
+	char *urn;
+	char *user;		/* who made it */
+	char *permalink;
+	guint count;		/* tracks as SoundCloud counts them */
+	guint all;		/* tracks fetched, before filtering */
+	gboolean liked;		/* someone else's, liked by the user */
+	GPtrArray *tracks;	/* every PdMediaItem, NULL until fetched */
+};
+
+/* The user's own and liked playlists; own ones come with their tracks. */
 GPtrArray *sc_playlists(GError **err);
+
+/*
+ * The playable tracks of @p, album set to the playlist title; blocked
+ * tracks are left out, preview only ones too under "full tracks only".
+ * Fetched once, filtered on every call.  Reference owned by the caller.
+ */
+GPtrArray *sc_playlist_tracks(PdScPlaylist *p, GError **err);
 
 /* Returns a URL FFmpeg can open (progressive MP3 or an HLS playlist). */
 char *sc_stream_url(PdMediaItem *item, GError **err);

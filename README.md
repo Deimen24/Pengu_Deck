@@ -153,9 +153,10 @@ own registered at
    OAuth 2.1 with PKCE; your password never passes through the app.
 
 Then search, or paste a track, set or artist link. Your likes load
-with the **♥ Likes** button, and **Playlists** loads the tracks of all
-your own and liked playlists with the playlist name in the Album column,
-so the filter box searches across them. Streaming needs the login; search and
+with the **♥ Likes** button. **Playlists** lists your own and liked
+playlists: **Open** shows a playlist's tracks (playlist name in the
+Album column), **+ Automix** queues the whole playlist. Blocked tracks
+are left out, and with **Full tracks** on preview only tracks too. Streaming needs the login; search and
 links work with the app credentials alone. Tokens are refreshed
 automatically and kept in `~/.config/pengu-deck/settings.ini`; the
 credentials can also come from the environment as
