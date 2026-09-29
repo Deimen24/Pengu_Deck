@@ -15,12 +15,25 @@ static struct app app;
 static void load_css(void)
 {
 	GtkCssProvider *css = gtk_css_provider_new();
+	const char *extra = g_getenv("PENGU_DECK_CSS");
 
+	/* the UI is designed for the dark variant only */
+	g_object_set(gtk_settings_get_default(),
+		     "gtk-application-prefer-dark-theme", TRUE, NULL);
 	gtk_css_provider_load_from_resource(css, "/io/github/deimen24/"
 					    "PenguDeck/style.css");
 	gtk_style_context_add_provider_for_display(gdk_display_get_default(),
 			GTK_STYLE_PROVIDER(css),
 			GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+	g_object_unref(css);
+	if (!extra)
+		return;
+	/* user overrides on top of the built in theme */
+	css = gtk_css_provider_new();
+	gtk_css_provider_load_from_path(css, extra);
+	gtk_style_context_add_provider_for_display(gdk_display_get_default(),
+			GTK_STYLE_PROVIDER(css),
+			GTK_STYLE_PROVIDER_PRIORITY_APPLICATION + 1);
 	g_object_unref(css);
 }
 

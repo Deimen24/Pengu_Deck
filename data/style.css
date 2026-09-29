@@ -809,22 +809,22 @@ notebook > header tab:hover {
 	padding: 6px;
 }
 
-listbox.sidebar {
+list.sidebar {
 	background: transparent;
 }
 
-listbox.sidebar > row.side-row {
+list.sidebar > row.side-row {
 	padding: 6px 8px;
 	border-radius: 8px;
 	color: @dim;
 }
 
-listbox.sidebar > row.side-row:selected {
+list.sidebar > row.side-row:selected {
 	background: alpha(@deck-a, 0.2);
 	color: @fg;
 }
 
-listbox.sidebar > row.side-row:hover {
+list.sidebar > row.side-row:hover {
 	background: alpha(@raised, 0.7);
 }
 
