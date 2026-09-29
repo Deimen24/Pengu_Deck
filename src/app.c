@@ -28,6 +28,7 @@ void app_init(struct app *a, GtkApplication *gtk)
 	cuestore_open();
 	playlists_open();
 	net_init();
+	net_set_soundcloud_cookies(a->cfg.sc_cookies);
 	a->library = g_list_store_new(PD_TYPE_MEDIA_ITEM);
 	a->sc_results = g_list_store_new(PD_TYPE_MEDIA_ITEM);
 	a->queue = g_list_store_new(PD_TYPE_MEDIA_ITEM);

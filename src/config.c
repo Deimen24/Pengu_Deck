@@ -96,6 +96,7 @@ void config_load(struct config *c)
 
 	c->sc_client_id = get_str(kf, "soundcloud", "client_id");
 	c->sc_token = get_str(kf, "soundcloud", "oauth_token");
+	c->sc_cookies = get_str(kf, "soundcloud", "cookies");
 
 	c->ndecks = get_int(kf, "decks", "count", 2);
 	c->pitch_range = get_int(kf, "decks", "pitch_range", 8);
@@ -165,6 +166,8 @@ void config_save(const struct config *c)
 			      c->sc_client_id ? c->sc_client_id : "");
 	g_key_file_set_string(kf, "soundcloud", "oauth_token",
 			      c->sc_token ? c->sc_token : "");
+	g_key_file_set_string(kf, "soundcloud", "cookies",
+			      c->sc_cookies ? c->sc_cookies : "");
 
 	g_key_file_set_integer(kf, "decks", "count", c->ndecks);
 	g_key_file_set_integer(kf, "decks", "pitch_range", c->pitch_range);
@@ -233,5 +236,6 @@ void config_clear(struct config *c)
 	g_free(c->record_dir);
 	g_free(c->sc_client_id);
 	g_free(c->sc_token);
+	g_free(c->sc_cookies);
 	memset(c, 0, sizeof(*c));
 }

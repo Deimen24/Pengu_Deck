@@ -5,6 +5,7 @@
 #include <string.h>
 
 #include "midi.h"
+#include "net.h"
 #include "prefs.h"
 #include "window.h"
 #include "sccache.h"
@@ -29,6 +30,7 @@ struct prefs {
 	GtkWidget *record_dir;
 	GtkWidget *client_id;
 	GtkWidget *token;
+	GtkWidget *cookies;
 	GtkWidget *detect;
 	GtkWidget *cache_label;
 	GtkWidget *mic;
@@ -424,6 +426,9 @@ static void on_apply(GtkButton *b, struct prefs *p)
 					GTK_EDITABLE(p->client_id)));
 	c->sc_token = g_strdup(gtk_editable_get_text(
 					GTK_EDITABLE(p->token)));
+	c->sc_cookies = g_strdup(gtk_editable_get_text(
+					GTK_EDITABLE(p->cookies)));
+	net_set_soundcloud_cookies(c->sc_cookies);
 	audio_changed = c->backend != old.backend ||
 			g_strcmp0(c->device, old.device) != 0 ||
 			c->rate != old.rate || c->period != old.period ||
@@ -434,6 +439,7 @@ static void on_apply(GtkButton *b, struct prefs *p)
 	g_free(old.record_dir);
 	g_free(old.sc_client_id);
 	g_free(old.sc_token);
+	g_free(old.sc_cookies);
 	g_free(old.mic_device);
 	config_save(c);
 
@@ -660,6 +666,16 @@ static void build_soundcloud(struct prefs *p, GtkWidget *nb)
 			      c->sc_token ? c->sc_token : "");
 	row(g, 1, "OAuth token", p->token);
 
+	p->cookies = gtk_entry_new();
+	gtk_entry_set_placeholder_text(GTK_ENTRY(p->cookies),
+				       "datadome=…");
+	gtk_editable_set_text(GTK_EDITABLE(p->cookies),
+			      c->sc_cookies ? c->sc_cookies : "");
+	gtk_widget_set_tooltip_text(p->cookies, "Cookies sent with every "
+				    "SoundCloud request, as name=value pairs "
+				    "separated by semicolons");
+	row(g, 2, "Cookies", p->cookies);
+
 	{
 		GtkWidget *cbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 		GtkWidget *b = gtk_button_new_with_label("Clear cache");
@@ -675,7 +691,7 @@ static void build_soundcloud(struct prefs *p, GtkWidget *nb)
 		g_signal_connect(b, "clicked", G_CALLBACK(on_clear_cache), p);
 		gtk_box_append(GTK_BOX(cbox), p->cache_label);
 		gtk_box_append(GTK_BOX(cbox), b);
-		row(g, 2, "Cache", cbox);
+		row(g, 3, "Cache", cbox);
 		g_free(txt);
 		g_free(size);
 	}
@@ -690,6 +706,12 @@ static void build_soundcloud(struct prefs *p, GtkWidget *nb)
 		"the \"oauth_token\" cookie (or the Authorization header of "
 		"any api-v2 request) here. The token is stored in "
 		"~/.config/pengu-deck/settings.ini with mode 0600.\n\n"
+		"If SoundCloud shows \"Verification Required\" in the app, its "
+		"bot protection has flagged your address. Pass the check "
+		"once in your browser, then copy the browser's "
+		"\"datadome\" cookie for soundcloud.com into the Cookies "
+		"field as datadome=VALUE: the app then sends the same "
+		"proof with its requests.\n\n"
 		"Tracks you load or queue are downloaded into the cache in "
 		"the background and play from disk from then on.");
 	gtk_label_set_wrap(GTK_LABEL(l), TRUE);

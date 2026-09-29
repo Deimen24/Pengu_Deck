@@ -2,6 +2,8 @@
 /*
  * net.c - minimal libcurl wrapper
  */
+#include <string.h>
+
 #include <curl/curl.h>
 
 #include "net.h"
@@ -18,6 +20,30 @@
 	"(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
 G_DEFINE_QUARK(pd-net-error-quark, net_error)
+
+static char *sc_cookies;
+G_LOCK_DEFINE_STATIC(sc_cookies);
+
+void net_set_soundcloud_cookies(const char *cookies)
+{
+	G_LOCK(sc_cookies);
+	g_free(sc_cookies);
+	sc_cookies = cookies && *cookies ? g_strdup(cookies) : NULL;
+	G_UNLOCK(sc_cookies);
+}
+
+static char *cookie_header_for(const char *url)
+{
+	char *hdr = NULL;
+
+	if (!strstr(url, "soundcloud.com") && !strstr(url, "sndcdn.com"))
+		return NULL;
+	G_LOCK(sc_cookies);
+	if (sc_cookies)
+		hdr = g_strdup_printf("Cookie: %s", sc_cookies);
+	G_UNLOCK(sc_cookies);
+	return hdr;
+}
 
 void net_init(void)
 {
@@ -45,7 +71,7 @@ char *net_get(const char *url, const char *auth, long *status,
 {
 	struct curl_slist *hdr = NULL;
 	GString *body = g_string_new(NULL);
-	char *line = NULL;
+	char *line = NULL, *cookie = NULL;
 	long code = 0;
 	CURLcode rc;
 	CURL *c;
@@ -66,6 +92,9 @@ char *net_get(const char *url, const char *auth, long *status,
 	hdr = curl_slist_append(hdr, "Sec-Fetch-Site: same-site");
 	hdr = curl_slist_append(hdr, "Sec-Fetch-Mode: cors");
 	hdr = curl_slist_append(hdr, "Sec-Fetch-Dest: empty");
+	cookie = cookie_header_for(url);
+	if (cookie)
+		hdr = curl_slist_append(hdr, cookie);
 	if (auth) {
 		line = g_strdup_printf("Authorization: %s", auth);
 		hdr = curl_slist_append(hdr, line);
@@ -86,6 +115,7 @@ char *net_get(const char *url, const char *auth, long *status,
 	curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
 	curl_easy_cleanup(c);
 	curl_slist_free_all(hdr);
+	g_free(cookie);
 	g_free(line);
 
 	if (status)

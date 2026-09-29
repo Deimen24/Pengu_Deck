@@ -17,7 +17,10 @@
 #include "decoder.h"
 
 #define OUT_FRAMES	8192
-#define USER_AGENT	"Mozilla/5.0 (X11; Linux x86_64) PenguDeck/" PD_VERSION
+/* the CDN sits behind the same bot protection as the site */
+#define USER_AGENT \
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " \
+	"(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
 struct decode_ctx {
 	struct track *t;

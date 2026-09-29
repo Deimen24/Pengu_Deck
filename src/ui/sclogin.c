@@ -88,8 +88,8 @@ static void on_open_browser(GtkButton *b, struct login *l)
 	g_object_unref(u);
 	gtk_label_set_text(GTK_LABEL(l->status),
 			   "Signed in in your browser? Copy the oauth_token "
-			   "cookie from soundcloud.com into Preferences → "
-			   "SoundCloud.");
+			   "and datadome cookies from soundcloud.com into "
+			   "Preferences → SoundCloud.");
 }
 
 /* When the embedded page misbehaves: retry, or use the system browser. */

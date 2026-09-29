@@ -27,6 +27,7 @@ struct config {
 	/* soundcloud */
 	char *sc_client_id;
 	char *sc_token;
+	char *sc_cookies;	/* bot protection cookies from a browser */
 
 	/* decks */
 	int ndecks;		/* 2 to 4 shown */
