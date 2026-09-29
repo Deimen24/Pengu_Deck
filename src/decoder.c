@@ -131,11 +131,14 @@ static int setup(struct decode_ctx *c)
 			     (size_t)((double)c->fmt->duration * t->rate /
 				      AV_TIME_BASE));
 
-	title = g_path_get_basename(t->uri);
-	track_set_meta(t, title, NULL);
-	g_free(title);
-	track_set_meta(t, tag(c->fmt, c->stream, "title"),
-		       tag(c->fmt, c->stream, "artist"));
+	/* a title given by the caller (library, SoundCloud) wins */
+	if (!track_has_title(t)) {
+		title = g_path_get_basename(t->uri);
+		track_set_meta(t, title, NULL);
+		g_free(title);
+		track_set_meta(t, tag(c->fmt, c->stream, "title"),
+			       tag(c->fmt, c->stream, "artist"));
+	}
 
 	c->pkt = av_packet_alloc();
 	c->frame = av_frame_alloc();

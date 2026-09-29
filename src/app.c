@@ -71,18 +71,28 @@ void app_shutdown(struct app *a)
 	g_clear_pointer(&a->preview_key, g_free);
 }
 
-/* Queued SoundCloud tracks are downloaded right away. */
+/*
+ * Queued SoundCloud tracks are downloaded right away.  Starting the
+ * download marks the row as changed, and a list must not be changed
+ * from inside its own change signal, so the work waits for the next
+ * main loop turn.
+ */
+static gboolean fetch_queued(gpointer data)
+{
+	PdMediaItem *item = data;
+
+	sccache_fetch(item);
+	g_object_unref(item);
+	return G_SOURCE_REMOVE;
+}
+
 static void queue_changed(GListModel *m, guint pos, guint removed,
 			  guint added, gpointer data)
 {
 	guint i;
 
-	for (i = pos; i < pos + added; i++) {
-		PdMediaItem *item = g_list_model_get_item(m, i);
-
-		sccache_fetch(item);
-		g_object_unref(item);
-	}
+	for (i = pos; i < pos + added; i++)
+		g_idle_add(fetch_queued, g_list_model_get_item(m, i));
 }
 
 static void notify_store(GListStore *s, PdMediaItem *m)

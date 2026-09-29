@@ -153,6 +153,16 @@ int track_append(struct track *t, const int16_t *frames, size_t n)
 	return 0;
 }
 
+bool track_has_title(struct track *t)
+{
+	bool has;
+
+	g_mutex_lock(&t->lock);
+	has = t->title && *t->title;
+	g_mutex_unlock(&t->lock);
+	return has;
+}
+
 void track_set_meta(struct track *t, const char *title, const char *artist)
 {
 	g_mutex_lock(&t->lock);

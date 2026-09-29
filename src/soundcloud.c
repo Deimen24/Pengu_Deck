@@ -11,6 +11,22 @@
 
 #define API		"https://api.soundcloud.com"
 #define TOKEN_URL	"https://secure.soundcloud.com/oauth/token"
+
+/* PENGU_DECK_SC_API / PENGU_DECK_SC_TOKEN_URL point the client at a
+ * stand in server for testing. */
+static const char *api_base(void)
+{
+	const char *e = g_getenv("PENGU_DECK_SC_API");
+
+	return e && *e ? e : API;
+}
+
+static const char *token_url(void)
+{
+	const char *e = g_getenv("PENGU_DECK_SC_TOKEN_URL");
+
+	return e && *e ? e : TOKEN_URL;
+}
 #define PAGE_LIMIT	50
 #define MAX_TRACKS	200
 #define ACCESS		"access=playable,preview"
@@ -250,7 +266,7 @@ static gboolean token_request(const char *grant, gboolean user, GError **err)
 		form = g_strdup_printf("%s&client_id=%s&client_secret=%s",
 				       grant, id, secret);
 	}
-	body = net_post_form(TOKEN_URL, form, basic, &status, &reply, err);
+	body = net_post_form(token_url(), form, basic, &status, &reply, err);
 	if (!body) {
 		if (reply && sc_parse_token_reply(reply, &t, NULL)) {
 			/* not reachable: an error status with a token */
@@ -322,7 +338,7 @@ char *sc_session_post_grant(const char *grant, char **reply, long *status,
 	g_mutex_unlock(&ses.lock);
 	form = g_strdup_printf("%s&client_id=%s&client_secret=%s", grant, id,
 			       secret);
-	body = net_post_form(TOKEN_URL, form, NULL, status, reply, err);
+	body = net_post_form(token_url(), form, NULL, status, reply, err);
 	g_free(form);
 	g_free(secret);
 	g_free(id);
@@ -395,7 +411,11 @@ out:
 static void refuse(GError **err, long status)
 {
 	g_clear_error(err);
-	if (status == 401 || status == 403)
+	if ((status == 401 || status == 403) && !sc_session_logged_in())
+		g_set_error_literal(err, SC_ERROR, SC_ERROR_NO_TOKEN,
+				    "SoundCloud allows this only for a signed "
+				    "in user: press \"Log in to SoundCloud\"");
+	else if (status == 401 || status == 403)
 		g_set_error(err, SC_ERROR, SC_ERROR_AUTH,
 			    "SoundCloud refused the request (HTTP %ld)",
 			    status);
@@ -576,9 +596,9 @@ static GPtrArray *fetch_tracks(const char *first_url, GError **err)
 GPtrArray *sc_search(const char *query, GError **err)
 {
 	char *q = g_uri_escape_string(query, NULL, FALSE);
-	char *url = g_strdup_printf(API "/tracks?q=%s&" ACCESS "&limit=%d"
-				    "&linked_partitioning=true", q,
-				    PAGE_LIMIT);
+	char *url = g_strdup_printf("%s/tracks?q=%s&" ACCESS "&limit=%d"
+				    "&linked_partitioning=true", api_base(),
+				    q, PAGE_LIMIT);
 	char *body = api_get(url, err);
 	GPtrArray *res = body ? sc_parse_tracks(body, err) : NULL;
 
@@ -597,7 +617,7 @@ GPtrArray *sc_resolve(const char *link, GError **err)
 	const char *kind, *urn;
 
 	q = g_uri_escape_string(link, NULL, FALSE);
-	url = g_strdup_printf(API "/resolve?url=%s", q);
+	url = g_strdup_printf("%s/resolve?url=%s", api_base(), q);
 	body = api_get(url, err);
 	g_free(url);
 	g_free(q);
@@ -618,17 +638,18 @@ GPtrArray *sc_resolve(const char *link, GError **err)
 	} else if (kind && strcmp(kind, "playlist") == 0 && urn) {
 		char *u = g_uri_escape_string(urn, NULL, FALSE);
 
-		url = g_strdup_printf(API "/playlists/%s/tracks?" ACCESS
-				      "&linked_partitioning=true", u);
+		url = g_strdup_printf("%s/playlists/%s/tracks?" ACCESS
+				      "&linked_partitioning=true", api_base(),
+				      u);
 		res = fetch_tracks(url, err);
 		g_free(url);
 		g_free(u);
 	} else if (kind && strcmp(kind, "user") == 0 && urn) {
 		char *u = g_uri_escape_string(urn, NULL, FALSE);
 
-		url = g_strdup_printf(API "/users/%s/tracks?" ACCESS
+		url = g_strdup_printf("%s/users/%s/tracks?" ACCESS
 				      "&limit=%d&linked_partitioning=true",
-				      u, PAGE_LIMIT);
+				      api_base(), u, PAGE_LIMIT);
 		res = fetch_tracks(url, err);
 		g_free(url);
 		g_free(u);
@@ -648,8 +669,12 @@ GPtrArray *sc_likes(GError **err)
 				    "Log in to SoundCloud to see your likes.");
 		return NULL;
 	}
-	return fetch_tracks(API "/me/likes/tracks?" ACCESS "&limit=200"
-			    "&linked_partitioning=true", err);
+	char *url = g_strdup_printf("%s/me/likes/tracks?" ACCESS "&limit=200"
+				    "&linked_partitioning=true", api_base());
+	GPtrArray *res = fetch_tracks(url, err);
+
+	g_free(url);
+	return res;
 }
 
 /* Progressive MP3 first: FFmpeg seeks it freely; then the HLS variants. */
@@ -663,7 +688,8 @@ static const char *const stream_keys[] = {
 
 char *sc_stream_url(PdMediaItem *m, GError **err)
 {
-	char *u, *url, *body, *res = NULL;
+	const char *u;
+	char *url, *body, *res = NULL;
 	JsonNode *root;
 	JsonObject *o;
 	guint i;
@@ -675,11 +701,12 @@ char *sc_stream_url(PdMediaItem *m, GError **err)
 			    "country)", m->title);
 		return NULL;
 	}
-	u = g_uri_escape_string(m->location, NULL, FALSE);
-	url = g_strdup_printf(API "/tracks/%s/streams", u);
+	/* the guide writes the numeric id in the path */
+	u = strrchr(m->location, ':');
+	url = g_strdup_printf("%s/tracks/%s/streams", api_base(),
+			      u ? u + 1 : m->location);
 	body = api_get(url, err);
 	g_free(url);
-	g_free(u);
 	if (!body)
 		return NULL;
 

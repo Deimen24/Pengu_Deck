@@ -79,6 +79,8 @@ void track_unref(struct track *t);
 /* Decoder side */
 int track_append(struct track *t, const int16_t *frames, size_t n);
 void track_set_meta(struct track *t, const char *title, const char *artist);
+/* True once a title is known, from the caller or the file's tags. */
+bool track_has_title(struct track *t);
 void track_fail(struct track *t, const char *msg);
 
 /* Reader side; returned strings must be freed with g_free(). */
