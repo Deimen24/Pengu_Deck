@@ -51,6 +51,7 @@ void app_shutdown(struct app *a)
 	g_clear_object(&a->sc_results);
 	g_clear_object(&a->queue);
 	g_clear_pointer(&a->played, g_hash_table_unref);
+	g_clear_pointer(&a->preview_key, g_free);
 }
 
 /* Queued SoundCloud tracks are downloaded right away. */
@@ -75,7 +76,7 @@ static void notify_store(GListStore *s, PdMediaItem *m)
 		PdMediaItem *x = g_list_model_get_item(G_LIST_MODEL(s), i);
 
 		g_object_unref(x);
-		if (x == m || g_str_equal(x->key, m->key))
+		if (x == m || (m->key && g_str_equal(x->key, m->key)))
 			g_list_model_items_changed(G_LIST_MODEL(s), i, 1, 1);
 	}
 }
@@ -191,15 +192,23 @@ static void restore_cues(struct deck *d, struct track *t)
 
 /* ---- loading ----------------------------------------------------- */
 
+#define DECK_PREVIEW	(-1)
+
+static struct deck *deck_for(struct app *a, int idx)
+{
+	return idx == DECK_PREVIEW ? &a->engine.preview : &a->engine.deck[idx];
+}
+
 static void load_uri(struct app *a, int idx, const char *uri,
 		     const char *key, const char *title, const char *artist,
 		     double tag_bpm)
 {
-	struct deck *d = &a->engine.deck[idx];
+	struct deck *d = deck_for(a, idx);
 	unsigned int rate = a->engine.rate ? a->engine.rate : 48000;
 	struct track *t;
 
-	app_save_cues(a, idx);
+	if (idx >= 0)
+		app_save_cues(a, idx);
 	t = track_new(uri, key, rate);
 	track_set_meta(t, title, artist);
 	deck_load(d, t);
@@ -207,6 +216,8 @@ static void load_uri(struct app *a, int idx, const char *uri,
 	atomic_store(&d->quantize, a->cfg.quantize);
 	atomic_store(&d->autogain, a->cfg.autogain);
 	restore_cues(d, t);
+	if (idx == DECK_PREVIEW)
+		deck_play(d, true);
 	if (!atomic_load(&t->analysed) && tag_bpm > 0.0) {
 		/* Keep the tag tempo, still analyse to find the grid. */
 		atomic_store(&t->bpm, tag_bpm);
@@ -236,7 +247,10 @@ static gboolean sc_load_done(gpointer data)
 	struct sc_load *l = data;
 	struct app *a = l->app;
 
-	a->loading[l->idx] = FALSE;
+	if (l->idx == DECK_PREVIEW)
+		a->preview_loading = FALSE;
+	else
+		a->loading[l->idx] = FALSE;
 	if (l->url) {
 		load_uri(a, l->idx, l->url, l->item->key, l->item->title,
 			 l->item->artist, l->item->bpm);
@@ -265,12 +279,13 @@ static gpointer sc_load_thread(gpointer data)
 	return NULL;
 }
 
-void app_load_item(struct app *a, int idx, PdMediaItem *m)
+static void load_item(struct app *a, int idx, PdMediaItem *m)
 {
 	struct sc_load *l;
 	char *cached;
+	gboolean *busy = idx == DECK_PREVIEW ? &a->preview_loading :
+			 &a->loading[idx];
 
-	mark_played(a, m);
 	if (m->source == MEDIA_LOCAL) {
 		load_uri(a, idx, m->location, m->key, m->title, m->artist,
 			 m->bpm);
@@ -284,15 +299,55 @@ void app_load_item(struct app *a, int idx, PdMediaItem *m)
 	}
 	/* Stream now, and keep a copy for next time. */
 	sccache_fetch(m);
-	if (a->loading[idx])
+	if (*busy)
 		return;
-	a->loading[idx] = TRUE;
-	app_toast(a, "Loading \"%s\" from SoundCloud…", m->title);
+	*busy = TRUE;
+	if (idx != DECK_PREVIEW)
+		app_toast(a, "Loading \"%s\" from SoundCloud…", m->title);
 	l = g_new0(struct sc_load, 1);
 	l->app = a;
 	l->idx = idx;
 	l->item = g_object_ref(m);
 	g_thread_unref(g_thread_new("pd-sc-load", sc_load_thread, l));
+}
+
+void app_load_item(struct app *a, int idx, PdMediaItem *m)
+{
+	mark_played(a, m);
+	load_item(a, idx, m);
+}
+
+void app_preview(struct app *a, PdMediaItem *m)
+{
+	PdMediaItem probe = { .key = a->preview_key };
+
+	if (app_previewing(a, m)) {
+		app_preview_stop(a);
+		return;
+	}
+	if (a->preview_key)
+		app_item_changed(a, &probe);
+	g_free(a->preview_key);
+	a->preview_key = g_strdup(m->key);
+	load_item(a, DECK_PREVIEW, m);
+	app_item_changed(a, m);
+}
+
+void app_preview_stop(struct app *a)
+{
+	PdMediaItem probe = { .key = a->preview_key };
+
+	deck_play(&a->engine.preview, false);
+	if (!a->preview_key)
+		return;
+	g_clear_pointer(&a->preview_key, g_free);
+	app_item_changed(a, &probe);
+}
+
+bool app_previewing(struct app *a, PdMediaItem *m)
+{
+	return a->preview_key && g_str_equal(a->preview_key, m->key) &&
+	       atomic_load(&a->engine.preview.playing);
 }
 
 void app_unload(struct app *a, int idx)

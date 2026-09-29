@@ -15,6 +15,8 @@
 #include "deck.h"
 #include "dsp.h"
 #include "engine.h"
+#include "fx.h"
+#include "sampler.h"
 #include "soundcloud.h"
 #include "track.h"
 
@@ -159,6 +161,64 @@ static void test_gain(void)
 	g = analyze_gain(t);
 	g_assert_cmpfloat(fabsf(g + 12.0f), <, 0.5f);	/* clamped */
 	track_unref(t);
+}
+
+static void test_fx(void)
+{
+	struct fx f;
+	float buf[512 * 2];
+	int t, i;
+
+	fx_init(&f);
+	fx_set_rate(&f, RATE);
+	atomic_store(&f.on, true);
+	for (t = FX_NONE; t < FX_COUNT; t++) {
+		float energy = 0.0f;
+
+		atomic_store(&f.type, t);
+		for (i = 0; i < 20; i++) {
+			int j;
+
+			for (j = 0; j < 512; j++)
+				buf[2 * j] = buf[2 * j + 1] =
+					0.5f * sinf(2.0f * (float)M_PI * 220.0f *
+						    (i * 512 + j) / RATE);
+			fx_process(&f, buf, 512, 128.0);
+			for (j = 0; j < 1024; j++) {
+				g_assert_false(isnan(buf[j]));
+				energy += buf[j] * buf[j];
+			}
+		}
+		g_assert_cmpfloat(energy, >, 0.0f);
+	}
+	fx_fini(&f);
+}
+
+static void test_sampler(void)
+{
+	struct sampler s;
+	struct track *t = make_beat(120.0, 1.0, 0);
+	float out[256 * 2];
+	int i;
+
+	sampler_init(&s);
+	sampler_set_rate(&s, RATE);
+	sampler_load(&s, 0, t);
+	track_unref(t);
+	memset(out, 0, sizeof(out));
+	sampler_render(&s, out, 256);
+	g_assert_cmpfloat(out[0], ==, 0.0f);	/* not triggered */
+	sampler_trigger(&s, 0, true);
+	memset(out, 0, sizeof(out));
+	for (i = 0; i < 4; i++)
+		sampler_render(&s, out, 256);
+	g_assert_true(atomic_load(&s.pad[0].playing));
+	g_assert_cmpfloat(atomic_load(&s.pad[0].pos), >, 0.0);
+	/* one shot ends by itself */
+	for (i = 0; i < RATE / 256 + 2; i++)
+		sampler_render(&s, out, 256);
+	g_assert_false(atomic_load(&s.pad[0].playing));
+	sampler_fini(&s);
 }
 
 static void test_bpm_fold(void)
@@ -414,6 +474,8 @@ int main(int argc, char **argv)
 	g_test_add_func("/analyze/95", test_tempo_95);
 	g_test_add_func("/analyze/fold", test_bpm_fold);
 	g_test_add_func("/analyze/key", test_key);
+	g_test_add_func("/fx/all", test_fx);
+	g_test_add_func("/sampler/oneshot", test_sampler);
 	g_test_add_func("/analyze/gain", test_gain);
 	g_test_add_func("/dsp/biquad", test_biquad);
 	g_test_add_func("/deck/play", test_deck_play);

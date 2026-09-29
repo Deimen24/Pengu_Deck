@@ -52,6 +52,9 @@
 	{ "deck" #n ".eq_mid", "Deck " L ": EQ mid", MIDI_ABSOLUTE, n }, \
 	{ "deck" #n ".eq_low", "Deck " L ": EQ low", MIDI_ABSOLUTE, n }, \
 	{ "deck" #n ".filter", "Deck " L ": filter", MIDI_ABSOLUTE, n }, \
+	{ "deck" #n ".fx_on", "Deck " L ": FX on/off", MIDI_BUTTON, n }, \
+	{ "deck" #n ".fx_wet", "Deck " L ": FX wet", MIDI_ABSOLUTE, n }, \
+	{ "deck" #n ".fx_param", "Deck " L ": FX parameter", MIDI_ABSOLUTE, n }, \
 	{ "deck" #n ".jog", "Deck " L ": jog wheel", MIDI_RELATIVE, n }
 
 static const struct midi_control controls[] = {
@@ -61,6 +64,15 @@ static const struct midi_control controls[] = {
 	{ "cue_vol", "Headphone volume", MIDI_ABSOLUTE, -1 },
 	{ "automix", "Automix on/off", MIDI_BUTTON, -1 },
 	{ "automix_next", "Automix next", MIDI_BUTTON, -1 },
+	{ "sampler1", "Sampler pad 1", MIDI_BUTTON, -1 },
+	{ "sampler2", "Sampler pad 2", MIDI_BUTTON, -1 },
+	{ "sampler3", "Sampler pad 3", MIDI_BUTTON, -1 },
+	{ "sampler4", "Sampler pad 4", MIDI_BUTTON, -1 },
+	{ "sampler5", "Sampler pad 5", MIDI_BUTTON, -1 },
+	{ "sampler6", "Sampler pad 6", MIDI_BUTTON, -1 },
+	{ "sampler7", "Sampler pad 7", MIDI_BUTTON, -1 },
+	{ "sampler8", "Sampler pad 8", MIDI_BUTTON, -1 },
+	{ "sampler_vol", "Sampler volume", MIDI_ABSOLUTE, -1 },
 	DECK_CONTROLS(0, "A"),
 	DECK_CONTROLS(1, "B"),
 	DECK_CONTROLS(2, "C"),
@@ -241,6 +253,9 @@ static void deck_button(int i, const char *what, bool press)
 			atomic_store(&d->key_shift,
 				     CLAMP(atomic_load(&d->key_shift) - 1,
 					   -12, 12));
+	} else if (g_str_equal(what, "fx_on")) {
+		if (press)
+			atomic_store(&d->fx.on, !atomic_load(&d->fx.on));
 	} else if (g_str_equal(what, "key_up")) {
 		if (press)
 			atomic_store(&d->key_shift,
@@ -268,6 +283,10 @@ static void deck_absolute(int i, const char *what, double f)
 		atomic_store(&d->eq_db[EQ_LOW], (float)(f * 35.0 - 26.0));
 	else if (g_str_equal(what, "filter"))
 		atomic_store(&d->filter, (float)(f * 2.0 - 1.0));
+	else if (g_str_equal(what, "fx_wet"))
+		atomic_store(&d->fx.wet, (float)f);
+	else if (g_str_equal(what, "fx_param"))
+		atomic_store(&d->fx.param, (float)f);
 }
 
 static void global_control(const char *name, int value, bool press)
@@ -287,6 +306,10 @@ static void global_control(const char *name, int value, bool press)
 		automix_set_enabled(!automix_enabled());
 	else if (g_str_equal(name, "automix_next") && press)
 		automix_next();
+	else if (g_str_has_prefix(name, "sampler_vol"))
+		atomic_store(&e->sampler.volume, (float)f);
+	else if (g_str_has_prefix(name, "sampler"))
+		sampler_trigger(&e->sampler, name[7] - '1', press);
 }
 
 static const struct midi_control *find_control(const char *name)

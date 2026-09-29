@@ -55,6 +55,7 @@ void deck_init(struct deck *d, int index)
 		d->hotcue[i] = -1.0;
 	d->tmp[0] = g_new0(float, DECK_MAX_BLOCK);
 	d->tmp[1] = g_new0(float, DECK_MAX_BLOCK);
+	fx_init(&d->fx);
 }
 
 static void rb_free(struct rb_state *s)
@@ -84,6 +85,7 @@ void deck_fini(struct deck *d)
 	d->rb = NULL;
 	g_free(d->tmp[0]);
 	g_free(d->tmp[1]);
+	fx_fini(&d->fx);
 }
 
 void deck_set_rate(struct deck *d, unsigned int rate)
@@ -91,6 +93,7 @@ void deck_set_rate(struct deck *d, unsigned int rate)
 	int b, c;
 
 	d->out_rate = rate;
+	fx_set_rate(&d->fx, rate);
 	for (b = 0; b < EQ_BANDS; b++) {
 		d->eq_cur[b] = NAN;
 		for (c = 0; c < 2; c++)
@@ -349,10 +352,13 @@ static void channel_strip(struct deck *d, float *out, unsigned int n)
 
 		out[2 * i] = l;
 		out[2 * i + 1] = r;
-		if (fabsf(l) > pl)
-			pl = fabsf(l);
-		if (fabsf(r) > pr)
-			pr = fabsf(r);
+	}
+	fx_process(&d->fx, out, n, d->cur_bpm);
+	for (i = 0; i < 2 * n; i += 2) {
+		if (fabsf(out[i]) > pl)
+			pl = fabsf(out[i]);
+		if (fabsf(out[i + 1]) > pr)
+			pr = fabsf(out[i + 1]);
 	}
 	if (pl > atomic_load(&d->peak_l))
 		atomic_store(&d->peak_l, pl);
@@ -492,6 +498,8 @@ void deck_render(struct deck *d, float *out, unsigned int n)
 	d->gain_db = t && atomic_load(&d->autogain) &&
 		     atomic_load(&t->gain_known) ? atomic_load(&t->gain_db) :
 		     0.0f;
+	d->cur_bpm = t ? atomic_load(&t->bpm) *
+			 (1.0 + atomic_load(&d->pitch)) : 0.0;
 	if (t && track_frames(t) > 0) {
 		render_track(d, t, n);
 	} else {

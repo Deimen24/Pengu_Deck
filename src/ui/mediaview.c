@@ -1,7 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /*
  * mediaview.c - track list
+ *
+ * Rows show the title with artist and album underneath, the musical key
+ * as a coloured Camelot pill, the tempo, the length, state icons and a
+ * headphone button for pre-listening.  The filter understands plain
+ * words plus "bpm:120-128", "key:8A" and "genre:techno" tokens.
  */
+#include <stdlib.h>
+#include <string.h>
+
 #include "analyze.h"
 #include "cuestore.h"
 #include "mediaview.h"
@@ -17,24 +25,51 @@ struct _PdMediaView {
 	GtkWidget *view;
 	GtkWidget *search;
 	GtkWidget *count;
-	GtkWidget *placeholder;
 	GtkWidget *stack;
 	char **terms;
+	double bpm_lo, bpm_hi;		/* from a bpm: token, 0 when unused */
+	char *key_filter;		/* Camelot code, lower case */
 };
 
 G_DEFINE_FINAL_TYPE(PdMediaView, pd_media_view, GTK_TYPE_BOX)
+
+/* ---- helpers ----------------------------------------------------- */
+
+static double item_bpm(PdMediaItem *m)
+{
+	double b = m->bpm;
+
+	if (b <= 0.0)
+		b = cuestore_bpm(m->key);
+	return b;
+}
 
 /* ---- filtering and sorting --------------------------------------- */
 
 static gboolean match(gpointer item, gpointer data)
 {
 	PdMediaView *v = data;
+	PdMediaItem *m = item;
 	const char *hay;
 	int i;
 
+	if (v->bpm_hi > 0.0) {
+		double b = item_bpm(m);
+
+		if (b < v->bpm_lo || b > v->bpm_hi)
+			return FALSE;
+	}
+	if (v->key_filter) {
+		char *c = g_ascii_strdown(key_camelot(cuestore_key(m->key)), -1);
+		gboolean ok = g_str_equal(c, v->key_filter);
+
+		g_free(c);
+		if (!ok)
+			return FALSE;
+	}
 	if (!v->terms)
 		return TRUE;
-	hay = pd_media_item_haystack(item);
+	hay = pd_media_item_haystack(m);
 	for (i = 0; v->terms[i]; i++)
 		if (*v->terms[i] && !strstr(hay, v->terms[i]))
 			return FALSE;
@@ -57,6 +92,97 @@ static int cmp_double(gconstpointer a, gconstpointer b, gpointer data)
 	double db = *(const double *)((const char *)b + off);
 
 	return da < db ? -1 : da > db;
+}
+
+static int cmp_key(gconstpointer a, gconstpointer b, gpointer data)
+{
+	int ka = cuestore_key(((PdMediaItem *)a)->key);
+	int kb = cuestore_key(((PdMediaItem *)b)->key);
+	int na = atoi(key_camelot(ka)), nb = atoi(key_camelot(kb));
+
+	if (na != nb)
+		return na - nb;
+	return ka - kb;
+}
+
+static int cmp_bpm(gconstpointer a, gconstpointer b, gpointer data)
+{
+	double da = item_bpm((PdMediaItem *)a), db = item_bpm((PdMediaItem *)b);
+
+	return da < db ? -1 : da > db;
+}
+
+/* ---- cells ------------------------------------------------------- */
+
+enum column {
+	COL_STATE,
+	COL_TRACK,
+	COL_KEY,
+	COL_BPM,
+	COL_DURATION,
+	COL_PREVIEW,
+};
+
+static void on_preview_clicked(GtkButton *b, GtkListItem *li)
+{
+	PdMediaView *v = g_object_get_data(G_OBJECT(b), "view");
+	PdMediaItem *m = gtk_list_item_get_item(li);
+
+	if (m)
+		app_preview(v->app, m);
+}
+
+static GtkWidget *make_cell(PdMediaView *v, enum column col, GtkListItem *li)
+{
+	GtkWidget *w, *l;
+
+	switch (col) {
+	case COL_TRACK:
+		w = gtk_box_new(GTK_ORIENTATION_VERTICAL, 1);
+		l = gtk_label_new("");
+		gtk_widget_add_css_class(l, "row-title");
+		gtk_label_set_xalign(GTK_LABEL(l), 0.0f);
+		gtk_label_set_ellipsize(GTK_LABEL(l), PANGO_ELLIPSIZE_END);
+		gtk_box_append(GTK_BOX(w), l);
+		l = gtk_label_new("");
+		gtk_widget_add_css_class(l, "row-sub");
+		gtk_label_set_xalign(GTK_LABEL(l), 0.0f);
+		gtk_label_set_ellipsize(GTK_LABEL(l), PANGO_ELLIPSIZE_END);
+		gtk_box_append(GTK_BOX(w), l);
+		gtk_widget_set_valign(w, GTK_ALIGN_CENTER);
+		return w;
+	case COL_KEY:
+	case COL_BPM:
+		w = gtk_label_new("");
+		gtk_widget_add_css_class(w, "pill");
+		gtk_widget_add_css_class(w, col == COL_KEY ? "pill-key" :
+					 "pill-bpm");
+		gtk_widget_set_halign(w, GTK_ALIGN_CENTER);
+		gtk_widget_set_valign(w, GTK_ALIGN_CENTER);
+		return w;
+	case COL_PREVIEW:
+		w = gtk_button_new_from_icon_name(
+				"audio-headphones-symbolic");
+		gtk_widget_add_css_class(w, "row-preview");
+		gtk_widget_set_focusable(w, FALSE);
+		gtk_widget_set_valign(w, GTK_ALIGN_CENTER);
+		gtk_widget_set_tooltip_text(w, "Pre-listen in the headphones");
+		g_object_set_data(G_OBJECT(w), "view", v);
+		g_signal_connect(w, "clicked", G_CALLBACK(on_preview_clicked),
+				 li);
+		return w;
+	case COL_STATE:
+	case COL_DURATION:
+	default:
+		w = gtk_label_new("");
+		gtk_widget_add_css_class(w, "mono");
+		gtk_widget_add_css_class(w, col == COL_STATE ? "row-state" :
+					 "row-len");
+		gtk_label_set_xalign(GTK_LABEL(w), col == COL_STATE ? 0.5f :
+				     1.0f);
+		gtk_widget_set_valign(w, GTK_ALIGN_CENTER);
+		return w;
+	}
 }
 
 /* ---- drag source ------------------------------------------------- */
@@ -95,99 +221,126 @@ static void drag_begin(GtkDragSource *src, GdkDrag *drag, GtkListItem *li)
 			       g_object_unref);
 }
 
-/* ---- cells ------------------------------------------------------- */
-
-enum column {
-	COL_STATE,
-	COL_TITLE,
-	COL_ARTIST,
-	COL_ALBUM,
-	COL_GENRE,
-	COL_BPM,
-	COL_KEY,
-	COL_DURATION,
-};
-
 static void setup_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 {
-	GtkWidget *l = gtk_label_new("");
+	PdMediaView *v = g_object_get_data(G_OBJECT(f), "view");
 	enum column col = GPOINTER_TO_INT(data);
+	GtkWidget *w = make_cell(v, col, li);
 	GtkDragSource *src = gtk_drag_source_new();
 
-	gtk_label_set_xalign(GTK_LABEL(l), col >= COL_BPM ? 1.0f : 0.0f);
-	gtk_label_set_ellipsize(GTK_LABEL(l), PANGO_ELLIPSIZE_END);
-	gtk_widget_set_hexpand(l, TRUE);
-	if (col >= COL_BPM)
-		gtk_widget_add_css_class(l, "mono");
+	gtk_widget_set_hexpand(w, col == COL_TRACK);
 	/* Every cell is a drag handle for its row. */
 	gtk_drag_source_set_actions(src, GDK_ACTION_COPY);
 	g_signal_connect(src, "prepare", G_CALLBACK(drag_prepare), li);
 	g_signal_connect(src, "drag-begin", G_CALLBACK(drag_begin), li);
-	gtk_widget_add_controller(l, GTK_EVENT_CONTROLLER(src));
-	gtk_list_item_set_child(li, l);
+	gtk_widget_add_controller(w, GTK_EVENT_CONTROLLER(src));
+	gtk_list_item_set_child(li, w);
+}
+
+static void bind_track(GtkWidget *box, PdMediaItem *m)
+{
+	GtkWidget *title = gtk_widget_get_first_child(box);
+	GtkWidget *sub = gtk_widget_get_next_sibling(title);
+	GString *s = g_string_new(m->artist && *m->artist ? m->artist :
+				  "Unknown artist");
+	char *t;
+
+	if (m->album && *m->album)
+		g_string_append_printf(s, "  ·  %s", m->album);
+	if (m->genre && *m->genre)
+		g_string_append_printf(s, "  ·  %s", m->genre);
+	if (m->source == MEDIA_SOUNDCLOUD)
+		g_string_append(s, "  ·  SoundCloud");
+	t = m->source == MEDIA_SOUNDCLOUD && m->preview ?
+	    g_strdup_printf("%s (preview)", m->title) : g_strdup(m->title);
+	gtk_label_set_text(GTK_LABEL(title), t);
+	gtk_label_set_text(GTK_LABEL(sub), s->str);
+	g_free(t);
+	g_string_free(s, TRUE);
+}
+
+/* The pill takes one of twelve "camelot-N" classes for its colour. */
+static void bind_key(GtkWidget *l, PdMediaItem *m)
+{
+	int k = cuestore_key(m->key);
+	int n = atoi(key_camelot(k)), i;
+	char cls[16], *text;
+
+	for (i = 1; i <= 12; i++) {
+		g_snprintf(cls, sizeof(cls), "camelot-%d", i);
+		gtk_widget_remove_css_class(l, cls);
+	}
+	if (k < 0) {
+		gtk_widget_set_visible(l, FALSE);
+		return;
+	}
+	gtk_widget_set_visible(l, TRUE);
+	text = g_strdup_printf("%s %s", key_camelot(k), key_name(k));
+	gtk_label_set_text(GTK_LABEL(l), text);
+	g_free(text);
+	g_snprintf(cls, sizeof(cls), "camelot-%d", n);
+	gtk_widget_add_css_class(l, cls);
 }
 
 static void bind_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 {
 	PdMediaItem *m = gtk_list_item_get_item(li);
-	GtkWidget *l = gtk_list_item_get_child(li);
+	GtkWidget *w = gtk_list_item_get_child(li);
 	PdMediaView *v = g_object_get_data(G_OBJECT(f), "view");
 	enum column col = GPOINTER_TO_INT(data);
+	gboolean played = app_item_played(v->app, m);
 	char *tmp = NULL;
-	const char *text = "";
 
-	if (app_item_played(v->app, m))
-		gtk_widget_add_css_class(l, "played");
+	if (played)
+		gtk_widget_add_css_class(w, "played");
 	else
-		gtk_widget_remove_css_class(l, "played");
+		gtk_widget_remove_css_class(w, "played");
 
 	switch (col) {
 	case COL_STATE: {
 		int pc = sccache_progress(m);
+		GString *s = g_string_new(played ? "✓" : "");
 
-		if (app_item_played(v->app, m))
-			text = "✓";
 		if (pc == 100)
-			text = tmp = g_strdup_printf("%s ⬇", text);
+			g_string_append(s, " ⬇");
 		else if (pc >= 0)
-			text = tmp = g_strdup_printf("%s %d%%", text, pc);
+			g_string_append_printf(s, " %d%%", pc);
 		else if (pc == -2)
-			text = tmp = g_strdup_printf("%s ✗", text);
+			g_string_append(s, " ✗");
+		gtk_label_set_text(GTK_LABEL(w), g_strstrip(s->str));
+		g_string_free(s, TRUE);
 		break;
 	}
-	case COL_TITLE:
-		if (m->source == MEDIA_SOUNDCLOUD && m->preview)
-			text = tmp = g_strdup_printf("%s (preview)",
-						     m->title);
-		else
-			text = m->title;
+	case COL_TRACK:
+		bind_track(w, m);
 		break;
-	case COL_ARTIST:
-		text = m->artist;
+	case COL_KEY:
+		bind_key(w, m);
 		break;
-	case COL_ALBUM:
-		text = m->album;
-		break;
-	case COL_GENRE:
-		text = m->genre;
-		break;
-	case COL_BPM:
-		if (m->bpm > 0.0)
-			text = tmp = g_strdup_printf("%.0f", m->bpm);
-		break;
-	case COL_KEY: {
-		int k = cuestore_key(m->key);
+	case COL_BPM: {
+		double b = item_bpm(m);
 
-		if (k >= 0)
-			text = tmp = g_strdup_printf("%s %s", key_camelot(k),
-						     key_name(k));
+		gtk_widget_set_visible(w, b > 0.0);
+		tmp = g_strdup_printf("%.0f", b);
+		gtk_label_set_text(GTK_LABEL(w), tmp);
 		break;
 	}
 	case COL_DURATION:
-		text = tmp = format_duration(m->duration);
+		tmp = format_duration(m->duration);
+		gtk_label_set_text(GTK_LABEL(w), tmp);
+		break;
+	case COL_PREVIEW:
+		if (app_previewing(v->app, m)) {
+			gtk_widget_add_css_class(w, "previewing");
+			gtk_button_set_icon_name(GTK_BUTTON(w),
+						 "media-playback-stop-symbolic");
+		} else {
+			gtk_widget_remove_css_class(w, "previewing");
+			gtk_button_set_icon_name(GTK_BUTTON(w),
+						 "audio-headphones-symbolic");
+		}
 		break;
 	}
-	gtk_label_set_text(GTK_LABEL(l), text ? text : "");
 	g_free(tmp);
 }
 
@@ -205,11 +358,12 @@ static void add_column(PdMediaView *v, const char *title, enum column col,
 	c = gtk_column_view_column_new(title, f);
 	gtk_column_view_column_set_sorter(c, sorter);
 	gtk_column_view_column_set_expand(c, expand);
-	gtk_column_view_column_set_resizable(c, TRUE);
+	gtk_column_view_column_set_resizable(c, expand);
 	if (width > 0)
 		gtk_column_view_column_set_fixed_width(c, width);
 	gtk_column_view_append_column(GTK_COLUMN_VIEW(v->view), c);
-	g_object_unref(sorter);
+	if (sorter)
+		g_object_unref(sorter);
 	g_object_unref(c);
 }
 
@@ -253,9 +407,41 @@ void pd_media_view_load_selected(PdMediaView *v, int idx)
 		app_load_item(v->app, idx, m);
 }
 
+void pd_media_view_queue_selected(PdMediaView *v)
+{
+	PdMediaItem *m = selected(v);
+
+	if (!m)
+		return;
+	g_list_store_append(v->app->queue, m);
+	app_toast(v->app, "Queued \"%s\"", m->title);
+}
+
 static void on_load_deck(GSimpleAction *a, GVariant *p, gpointer data)
 {
 	pd_media_view_load_selected(data, g_variant_get_int32(p));
+}
+
+static void on_queue(GSimpleAction *a, GVariant *p, gpointer data)
+{
+	pd_media_view_queue_selected(data);
+}
+
+static void on_preview(GSimpleAction *a, GVariant *p, gpointer data)
+{
+	PdMediaView *v = data;
+	PdMediaItem *m = selected(v);
+
+	if (m)
+		app_preview(v->app, m);
+}
+
+static void on_cache(GSimpleAction *a, GVariant *p, gpointer data)
+{
+	PdMediaItem *m = selected(data);
+
+	if (m)
+		sccache_fetch(m);
 }
 
 static void on_open_link(GSimpleAction *a, GVariant *p, gpointer data)
@@ -271,14 +457,48 @@ static void on_open_link(GSimpleAction *a, GVariant *p, gpointer data)
 	g_object_unref(l);
 }
 
-static GMenuModel *build_menu(PdMediaView *v);
+GtkWidget *pd_media_view_queue_button(PdMediaView *v)
+{
+	GtkWidget *b = gtk_button_new_with_label("+ Queue");
+
+	gtk_widget_add_css_class(b, "queue-button");
+	gtk_widget_set_focusable(b, FALSE);
+	gtk_widget_set_tooltip_text(b, "Add the selected track to the "
+				    "automix queue");
+	g_signal_connect_swapped(b, "clicked",
+				 G_CALLBACK(pd_media_view_queue_selected), v);
+	return b;
+}
+
+static GMenuModel *build_menu(PdMediaView *v)
+{
+	GMenu *menu = g_menu_new();
+	int i;
+
+	for (i = 0; i < v->app->cfg.ndecks; i++) {
+		char *label = g_strdup_printf("Load to deck %c",
+					      app_deck_letter(i));
+		GMenuItem *item = g_menu_item_new(label, NULL);
+
+		g_menu_item_set_action_and_target(item, "media.load", "i", i);
+		g_menu_append_item(menu, item);
+		g_object_unref(item);
+		g_free(label);
+	}
+	g_menu_append(menu, "Pre-listen in headphones", "media.preview");
+	g_menu_append(menu, "Add to automix queue", "media.queue");
+	if (v->store == v->app->sc_results) {
+		g_menu_append(menu, "Download to cache", "media.cache");
+		g_menu_append(menu, "Open on SoundCloud", "media.open-link");
+	}
+	return G_MENU_MODEL(menu);
+}
 
 static void on_right_click(GtkGestureClick *g, int n, double x, double y,
 			   PdMediaView *v)
 {
 	GtkWidget *pop = g_object_get_data(G_OBJECT(v), "popover");
 	GdkRectangle r = { (int)x, (int)y, 1, 1 };
-
 	GMenuModel *menu = build_menu(v);
 
 	/* Rebuild the menu so it lists exactly the visible decks. */
@@ -286,6 +506,31 @@ static void on_right_click(GtkGestureClick *g, int n, double x, double y,
 	g_object_unref(menu);
 	gtk_popover_set_pointing_to(GTK_POPOVER(pop), &r);
 	gtk_popover_popup(GTK_POPOVER(pop));
+}
+
+static GtkWidget *build_popover(PdMediaView *v)
+{
+	GSimpleActionGroup *grp = g_simple_action_group_new();
+	static const GActionEntry entries[] = {
+		{ "load", on_load_deck, "i" },
+		{ "queue", on_queue },
+		{ "preview", on_preview },
+		{ "cache", on_cache },
+		{ "open-link", on_open_link },
+	};
+	GMenuModel *menu = build_menu(v);
+	GtkWidget *pop;
+
+	g_action_map_add_action_entries(G_ACTION_MAP(grp), entries,
+					G_N_ELEMENTS(entries), v);
+	gtk_widget_insert_action_group(GTK_WIDGET(v), "media",
+				       G_ACTION_GROUP(grp));
+	pop = gtk_popover_menu_new_from_model(menu);
+	gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
+	gtk_widget_set_parent(pop, v->view);
+	g_object_unref(menu);
+	g_object_unref(grp);
+	return pop;
 }
 
 /* ---- construction ------------------------------------------------ */
@@ -317,6 +562,7 @@ static void pd_media_view_finalize(GObject *obj)
 	PdMediaView *v = PD_MEDIA_VIEW(obj);
 
 	g_strfreev(v->terms);
+	g_free(v->key_filter);
 	G_OBJECT_CLASS(pd_media_view_parent_class)->finalize(obj);
 }
 
@@ -327,89 +573,6 @@ static void pd_media_view_class_init(PdMediaViewClass *klass)
 
 static void pd_media_view_init(PdMediaView *v)
 {
-}
-
-static GMenuModel *build_menu(PdMediaView *v)
-{
-	GMenu *menu = g_menu_new();
-	int i;
-
-	for (i = 0; i < v->app->cfg.ndecks; i++) {
-		char *label = g_strdup_printf("Load to deck %c",
-					      app_deck_letter(i));
-		GMenuItem *item = g_menu_item_new(label, NULL);
-
-		g_menu_item_set_action_and_target(item, "media.load", "i", i);
-		g_menu_append_item(menu, item);
-		g_object_unref(item);
-		g_free(label);
-	}
-	g_menu_append(menu, "Add to automix queue", "media.queue");
-	if (v->store == v->app->sc_results) {
-		g_menu_append(menu, "Download to cache", "media.cache");
-		g_menu_append(menu, "Open on SoundCloud", "media.open-link");
-	}
-	return G_MENU_MODEL(menu);
-}
-
-void pd_media_view_queue_selected(PdMediaView *v)
-{
-	PdMediaItem *m = selected(v);
-
-	if (!m)
-		return;
-	g_list_store_append(v->app->queue, m);
-	app_toast(v->app, "Queued \"%s\"", m->title);
-}
-
-static void on_queue(GSimpleAction *a, GVariant *p, gpointer data)
-{
-	pd_media_view_queue_selected(data);
-}
-
-GtkWidget *pd_media_view_queue_button(PdMediaView *v)
-{
-	GtkWidget *b = gtk_button_new_with_label("+ Queue");
-
-	gtk_widget_add_css_class(b, "queue-button");
-	gtk_widget_set_focusable(b, FALSE);
-	gtk_widget_set_tooltip_text(b, "Add the selected track to the "
-				    "automix queue");
-	g_signal_connect_swapped(b, "clicked",
-				 G_CALLBACK(pd_media_view_queue_selected), v);
-	return b;
-}
-
-static void on_cache(GSimpleAction *a, GVariant *p, gpointer data)
-{
-	PdMediaItem *m = selected(data);
-
-	if (m)
-		sccache_fetch(m);
-}
-
-static GtkWidget *build_popover(PdMediaView *v)
-{
-	GSimpleActionGroup *grp = g_simple_action_group_new();
-	static const GActionEntry entries[] = {
-		{ "load", on_load_deck, "i" },
-		{ "queue", on_queue },
-		{ "cache", on_cache },
-		{ "open-link", on_open_link },
-	};
-	GMenuModel *menu = build_menu(v);
-	GtkWidget *pop;
-
-	g_action_map_add_action_entries(G_ACTION_MAP(grp), entries,
-					G_N_ELEMENTS(entries), v);
-	gtk_widget_insert_action_group(GTK_WIDGET(v), "media",
-				       G_ACTION_GROUP(grp));
-	pop = gtk_popover_menu_new_from_model(menu);
-	gtk_popover_set_has_arrow(GTK_POPOVER(pop), FALSE);
-	gtk_widget_set_parent(pop, v->view);
-	g_object_unref(menu);
-	g_object_unref(grp);
-	return pop;
 }
 
 GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
@@ -440,7 +603,7 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 	gtk_column_view_set_single_click_activate(GTK_COLUMN_VIEW(v->view),
 						  FALSE);
 	gtk_column_view_set_show_row_separators(GTK_COLUMN_VIEW(v->view),
-						FALSE);
+						TRUE);
 	gtk_widget_add_css_class(v->view, "data-table");
 
 #define STR_SORTER(field) \
@@ -449,16 +612,17 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 #define NUM_SORTER(field) \
 	GTK_SORTER(gtk_custom_sorter_new(cmp_double, \
 		GSIZE_TO_POINTER(G_STRUCT_OFFSET(PdMediaItem, field)), NULL))
-	add_column(v, "", COL_STATE, STR_SORTER(key), FALSE, 64);
-	add_column(v, "Title", COL_TITLE, STR_SORTER(title), TRUE, 0);
-	add_column(v, "Artist", COL_ARTIST, STR_SORTER(artist), TRUE, 0);
-	if (!sc)
-		add_column(v, "Album", COL_ALBUM, STR_SORTER(album), TRUE, 0);
-	add_column(v, "Genre", COL_GENRE, STR_SORTER(genre), FALSE, 110);
-	add_column(v, "BPM", COL_BPM, NUM_SORTER(bpm), FALSE, 60);
-	add_column(v, "Key", COL_KEY, STR_SORTER(key), FALSE, 76);
+	add_column(v, "", COL_STATE, NULL, FALSE, 56);
+	add_column(v, "Track", COL_TRACK, STR_SORTER(title), TRUE, 0);
+	add_column(v, "Key", COL_KEY,
+		   GTK_SORTER(gtk_custom_sorter_new(cmp_key, NULL, NULL)),
+		   FALSE, 92);
+	add_column(v, "BPM", COL_BPM,
+		   GTK_SORTER(gtk_custom_sorter_new(cmp_bpm, NULL, NULL)),
+		   FALSE, 64);
 	add_column(v, "Length", COL_DURATION, NUM_SORTER(duration), FALSE,
-		   70);
+		   72);
+	add_column(v, "", COL_PREVIEW, NULL, FALSE, 44);
 #undef STR_SORTER
 #undef NUM_SORTER
 
@@ -494,11 +658,13 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 
 	v->search = gtk_search_entry_new();
 	gtk_search_entry_set_placeholder_text(GTK_SEARCH_ENTRY(v->search),
-					      sc ? "Search SoundCloud or paste "
-						   "a link" : "Filter library");
+					      sc ? "Filter results" :
+					      "Filter: words, bpm:120-128, "
+					      "key:8A, genre:techno");
 	g_signal_connect(v->search, "changed", G_CALLBACK(on_search), v);
 	v->count = gtk_label_new("");
 	gtk_widget_add_css_class(v->count, "dim-label");
+	gtk_widget_add_css_class(v->count, "row-count");
 	gtk_box_append(GTK_BOX(v), v->count);
 	g_signal_connect(v->selection, "items-changed",
 			 G_CALLBACK(on_items_changed), v);
@@ -514,9 +680,44 @@ GtkWidget *pd_media_view_search_entry(PdMediaView *v)
 void pd_media_view_set_filter(PdMediaView *v, const char *text)
 {
 	char *fold = g_utf8_casefold(text ? text : "", -1);
+	char **words = g_strsplit(fold, " ", -1);
+	GPtrArray *plain = g_ptr_array_new();
+	int i;
 
 	g_strfreev(v->terms);
-	v->terms = *fold ? g_strsplit(fold, " ", -1) : NULL;
+	v->terms = NULL;
+	v->bpm_lo = v->bpm_hi = 0.0;
+	g_clear_pointer(&v->key_filter, g_free);
+
+	for (i = 0; words[i]; i++) {
+		char *w = words[i];
+
+		if (!*w)
+			continue;
+		if (g_str_has_prefix(w, "bpm:")) {
+			double lo = g_ascii_strtod(w + 4, NULL);
+			const char *dash = strchr(w + 4, '-');
+
+			v->bpm_lo = lo - (dash ? 0.0 : 2.0);
+			v->bpm_hi = dash ? g_ascii_strtod(dash + 1, NULL) :
+				    lo + 2.0;
+			if (v->bpm_hi < v->bpm_lo)
+				v->bpm_hi = v->bpm_lo;
+		} else if (g_str_has_prefix(w, "key:")) {
+			v->key_filter = g_strdup(w + 4);
+		} else if (g_str_has_prefix(w, "genre:")) {
+			g_ptr_array_add(plain, g_strdup(w + 6));
+		} else {
+			g_ptr_array_add(plain, g_strdup(w));
+		}
+	}
+	if (plain->len) {
+		g_ptr_array_add(plain, NULL);
+		v->terms = (char **)g_ptr_array_free(plain, FALSE);
+	} else {
+		g_ptr_array_free(plain, TRUE);
+	}
+	g_strfreev(words);
 	g_free(fold);
 	gtk_filter_changed(gtk_filter_list_model_get_filter(v->filtered),
 			   GTK_FILTER_CHANGE_DIFFERENT);

@@ -14,6 +14,7 @@ BuildRequires:  pkgconfig(libavformat) pkgconfig(libavcodec)
 BuildRequires:  pkgconfig(libavutil) pkgconfig(libswresample)
 BuildRequires:  pkgconfig(rubberband)
 BuildRequires:  pkgconfig(libpulse) pkgconfig(alsa)
+BuildRequires:  pkgconfig(webkitgtk-6.0)
 BuildRequires:  desktop-file-utils
 # Fedora's ffmpeg-free decodes MP3, FLAC, Vorbis, Opus and AAC; the RPM
 # Fusion ffmpeg-devel works too when it is installed instead.
@@ -28,7 +29,7 @@ keylock, headphone cueing, recording and SoundCloud streaming.
 %autosetup -n Pengu_Deck-%{version}
 
 %build
-%meson -Dkeylock=enabled
+%meson -Dkeylock=enabled -Dsclogin=enabled
 %meson_build
 
 %check
@@ -45,6 +46,7 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/io.github.deimen24.Pe
 %{_datadir}/applications/io.github.deimen24.PenguDeck.desktop
 %{_datadir}/metainfo/io.github.deimen24.PenguDeck.metainfo.xml
 %{_datadir}/icons/hicolor/scalable/apps/io.github.deimen24.PenguDeck.svg
+%{_datadir}/icons/hicolor/128x128/apps/io.github.deimen24.PenguDeck.png
 
 %changelog
 * Tue Sep 29 2026 deimen24 - 0.1.0-1

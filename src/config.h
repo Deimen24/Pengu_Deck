@@ -38,6 +38,9 @@ struct config {
 	/* automix */
 	int automix_fade;	/* seconds */
 	gboolean automix_sync;
+
+	/* sampler */
+	char *samples[8];
 };
 
 void config_load(struct config *c);

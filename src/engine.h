@@ -9,6 +9,7 @@
 #include <stdbool.h>
 
 #include "deck.h"
+#include "sampler.h"
 
 #define ENGINE_DECKS	4	/* always rendered, the UI shows 2 to 4 */
 
@@ -44,6 +45,8 @@ struct engine_priv;
 
 struct engine {
 	struct deck deck[ENGINE_DECKS];
+	struct deck preview;		/* library pre-listen, cue bus only */
+	struct sampler sampler;
 
 	/* shared, written by the gui */
 	_Atomic float xfader;		/* -1 = deck A .. 1 = deck B */

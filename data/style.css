@@ -622,3 +622,180 @@ popover > contents {
 	border-radius: 10px;
 	padding: 10px;
 }
+
+/* ---- track list -------------------------------------------------- */
+
+columnview.data-table > listview > row {
+	min-height: 44px;
+	border-bottom: 1px solid #14181f;
+}
+
+.row-title {
+	font-weight: 700;
+	font-size: 13px;
+}
+
+.row-sub {
+	font-size: 11px;
+	color: @dim;
+}
+
+.played .row-title,
+label.played {
+	color: @dim;
+}
+
+.row-state {
+	color: @deck-a;
+	font-size: 11px;
+}
+
+.row-len {
+	color: @dim;
+}
+
+.pill {
+	font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace;
+	font-size: 11px;
+	font-weight: 700;
+	padding: 2px 8px;
+	border-radius: 10px;
+	border: 1px solid @line;
+	background: @panel2;
+}
+
+.pill-bpm {
+	color: #fde047;
+	border-color: alpha(#fde047, 0.4);
+	background: alpha(#fde047, 0.1);
+}
+
+button.row-preview {
+	min-width: 28px;
+	min-height: 28px;
+	padding: 2px;
+	border-radius: 14px;
+	background: transparent;
+	border-color: transparent;
+	color: @dim;
+	box-shadow: none;
+}
+
+button.row-preview:hover {
+	background: @raised;
+	color: @fg;
+}
+
+button.row-preview.previewing {
+	background: #22d3ee;
+	color: #06202b;
+}
+
+.row-count {
+	font-size: 11px;
+	margin: 2px 8px;
+}
+
+/* ---- effects ----------------------------------------------------- */
+
+dropdown.fx-select > button {
+	font-size: 10px;
+	padding: 2px 4px;
+	min-height: 22px;
+	color: #f472b6;
+}
+
+button.fx-beats {
+	font-size: 10px;
+	padding: 2px 4px;
+	min-height: 22px;
+	min-width: 24px;
+}
+
+button.fx-on {
+	font-size: 10px;
+	padding: 2px 4px;
+	min-height: 22px;
+	color: #f472b6;
+	border-color: alpha(#f472b6, 0.5);
+}
+
+button.fx-on:checked {
+	background: #f472b6;
+	color: #2a0a1c;
+	box-shadow: 0 0 10px alpha(#f472b6, 0.7);
+}
+
+/* ---- sampler ----------------------------------------------------- */
+
+button.sample-pad {
+	min-height: 70px;
+	background: linear-gradient(180deg, #232834, #181c25);
+	border: 1px solid alpha(#f472b6, 0.35);
+	border-radius: 10px;
+}
+
+button.sample-pad:active,
+button.sample-pad.playing {
+	background: alpha(#f472b6, 0.35);
+	border-color: #f472b6;
+	box-shadow: 0 0 14px alpha(#f472b6, 0.6);
+}
+
+.sample-number {
+	font-size: 18px;
+	font-weight: 900;
+	color: #f472b6;
+}
+
+.sample-name {
+	font-size: 11px;
+	color: @dim;
+}
+
+progressbar.sample-bar > trough {
+	min-height: 4px;
+	background: #0a0c10;
+	border-radius: 2px;
+}
+
+progressbar.sample-bar > trough > progress {
+	min-height: 4px;
+	background: #f472b6;
+	border-radius: 2px;
+}
+
+button.sc-login {
+	color: #f97316;
+	border-color: alpha(#f97316, 0.5);
+}
+
+button.sc-login.logged-in {
+	color: @dim;
+	border-color: @line;
+}
+
+/* Camelot wheel colours for the key pills */
+.pill.camelot-1 { background: alpha(#4ade80, 0.18); color: #4ade80; border-color: alpha(#4ade80, 0.6); }
+.pill.camelot-2 { background: alpha(#22d3ee, 0.18); color: #22d3ee; border-color: alpha(#22d3ee, 0.6); }
+.pill.camelot-3 { background: alpha(#38bdf8, 0.18); color: #38bdf8; border-color: alpha(#38bdf8, 0.6); }
+.pill.camelot-4 { background: alpha(#818cf8, 0.18); color: #818cf8; border-color: alpha(#818cf8, 0.6); }
+.pill.camelot-5 { background: alpha(#c084fc, 0.18); color: #c084fc; border-color: alpha(#c084fc, 0.6); }
+.pill.camelot-6 { background: alpha(#f472b6, 0.18); color: #f472b6; border-color: alpha(#f472b6, 0.6); }
+.pill.camelot-7 { background: alpha(#fb7185, 0.18); color: #fb7185; border-color: alpha(#fb7185, 0.6); }
+.pill.camelot-8 { background: alpha(#f97316, 0.18); color: #f97316; border-color: alpha(#f97316, 0.6); }
+.pill.camelot-9 { background: alpha(#fbbf24, 0.18); color: #fbbf24; border-color: alpha(#fbbf24, 0.6); }
+.pill.camelot-10 { background: alpha(#facc15, 0.18); color: #facc15; border-color: alpha(#facc15, 0.6); }
+.pill.camelot-11 { background: alpha(#a3e635, 0.18); color: #a3e635; border-color: alpha(#a3e635, 0.6); }
+.pill.camelot-12 { background: alpha(#34d399, 0.18); color: #34d399; border-color: alpha(#34d399, 0.6); }
+
+notebook > header > tabs > tab:checked,
+notebook > header tab:checked {
+	background: none;
+	box-shadow: inset 0 -2px 0 @deck-a;
+	border-bottom: none;
+}
+
+notebook > header tab:hover {
+	background: alpha(@raised, 0.6);
+}

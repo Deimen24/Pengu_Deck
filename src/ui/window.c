@@ -8,6 +8,7 @@
 #include "pd-build.h"
 #include "prefs.h"
 #include "queueview.h"
+#include "samplerview.h"
 #include "scview.h"
 #include "window.h"
 
@@ -21,6 +22,7 @@ struct _PdWindow {
 	GtkWidget *lib;
 	GtkWidget *sc;
 	GtkWidget *queue;
+	GtkWidget *sampler;
 	GtkWidget *deck_btn[ENGINE_DECKS - 1];
 	gboolean updating;
 	GtkWidget *notebook;
@@ -447,6 +449,9 @@ GtkWidget *pd_window_new(struct app *app)
 				 gtk_label_new("SoundCloud"));
 	gtk_notebook_append_page(GTK_NOTEBOOK(w->notebook), w->queue,
 				 gtk_label_new("Automix"));
+	w->sampler = pd_sampler_view_new(app);
+	gtk_notebook_append_page(GTK_NOTEBOOK(w->notebook), w->sampler,
+				 gtk_label_new("Sampler"));
 	gtk_widget_set_margin_start(w->notebook, 8);
 	gtk_widget_set_margin_end(w->notebook, 8);
 	gtk_widget_set_margin_bottom(w->notebook, 8);

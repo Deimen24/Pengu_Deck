@@ -71,6 +71,7 @@ void config_load(struct config *c)
 {
 	GKeyFile *kf = g_key_file_new();
 	char *path = config_path();
+	int i;
 
 	memset(c, 0, sizeof(*c));
 	g_key_file_load_from_file(kf, path, G_KEY_FILE_NONE, NULL);
@@ -104,6 +105,12 @@ void config_load(struct config *c)
 
 	c->automix_fade = CLAMP(get_int(kf, "automix", "fade", 12), 2, 90);
 	c->automix_sync = get_int(kf, "automix", "sync", 1);
+	for (i = 0; i < 8; i++) {
+		char name[8];
+
+		g_snprintf(name, sizeof(name), "pad%d", i + 1);
+		c->samples[i] = get_str(kf, "sampler", name);
+	}
 
 	if (c->backend < BACKEND_AUTO || c->backend > BACKEND_NULL)
 		c->backend = BACKEND_AUTO;
@@ -124,6 +131,7 @@ void config_save(const struct config *c)
 	char *path = config_path();
 	char *dir = g_path_get_dirname(path);
 	GError *err = NULL;
+	int i;
 
 	g_key_file_set_integer(kf, "audio", "backend", c->backend);
 	g_key_file_set_string(kf, "audio", "device",
@@ -151,6 +159,13 @@ void config_save(const struct config *c)
 
 	g_key_file_set_integer(kf, "automix", "fade", c->automix_fade);
 	g_key_file_set_integer(kf, "automix", "sync", c->automix_sync);
+	for (i = 0; i < 8; i++) {
+		char name[8];
+
+		g_snprintf(name, sizeof(name), "pad%d", i + 1);
+		g_key_file_set_string(kf, "sampler", name,
+				      c->samples[i] ? c->samples[i] : "");
+	}
 
 	g_mkdir_with_parents(dir, 0700);
 	if (!g_key_file_save_to_file(kf, path, &err)) {
@@ -168,6 +183,10 @@ void config_save(const struct config *c)
 
 void config_clear(struct config *c)
 {
+	int i;
+
+	for (i = 0; i < 8; i++)
+		g_free(c->samples[i]);
 	g_free(c->device);
 	g_strfreev(c->folders);
 	g_free(c->record_dir);

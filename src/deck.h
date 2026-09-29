@@ -14,6 +14,7 @@
 #include <stdbool.h>
 
 #include "dsp.h"
+#include "fx.h"
 #include "track.h"
 
 #define DECK_HOTCUES		4
@@ -63,6 +64,7 @@ struct deck {
 	atomic_bool loop_on;
 
 	/* shared: channel strip */
+	struct fx fx;
 	_Atomic float trim_db;
 	_Atomic float eq_db[EQ_BANDS];
 	atomic_bool eq_kill[EQ_BANDS];
@@ -90,6 +92,7 @@ struct deck {
 	double slip_pos;		/* where playback would be without slip */
 	bool was_slipping;
 	float gain_db;			/* auto gain applied this block */
+	double cur_bpm;			/* effective bpm for the fx unit */
 	struct rb_state *rb;
 	float *tmp[2];
 };

@@ -23,6 +23,7 @@ struct engine_priv {
 	float gain[ENGINE_DECKS];	/* smoothed channel gains */
 	float lim;		/* limiter gain */
 	float deck_buf[ENGINE_DECKS][DECK_MAX_BLOCK * 2];
+	float prev_buf[DECK_MAX_BLOCK * 2];
 	float mix[DECK_MAX_BLOCK * 2];
 	float cue[DECK_MAX_BLOCK * 2];
 
@@ -43,6 +44,8 @@ void engine_init(struct engine *e)
 	memset(e, 0, sizeof(*e));
 	for (i = 0; i < ENGINE_DECKS; i++)
 		deck_init(&e->deck[i], i);
+	deck_init(&e->preview, ENGINE_DECKS);
+	sampler_init(&e->sampler);
 	atomic_init(&e->master, 1.0f);
 	atomic_init(&e->cue_mix, 0.0f);
 	atomic_init(&e->cue_vol, 1.0f);
@@ -58,6 +61,8 @@ void engine_fini(struct engine *e)
 	engine_close(e);
 	for (i = 0; i < ENGINE_DECKS; i++)
 		deck_fini(&e->deck[i]);
+	deck_fini(&e->preview);
+	sampler_fini(&e->sampler);
 	g_free(e->priv);
 	e->priv = NULL;
 }
@@ -104,8 +109,10 @@ static void mix_block(struct engine *e, unsigned int n)
 		step[k] = (target[k] - p->gain[k]) / (float)n;
 	}
 
+	memset(p->mix, 0, 2 * n * sizeof(float));
+	sampler_render(&e->sampler, p->mix, n);
 	for (i = 0; i < 2 * n; i += 2) {
-		float l = 0.0f, r = 0.0f, a;
+		float l = p->mix[i], r = p->mix[i + 1], a;
 
 		for (k = 0; k < ENGINE_DECKS; k++) {
 			p->gain[k] += step[k];
@@ -151,7 +158,7 @@ static void cue_block(struct engine *e, unsigned int n)
 		pfl[k] = atomic_load(&e->deck[k].pfl);
 
 	for (i = 0; i < 2 * n; i++) {
-		float c = 0.0f;
+		float c = p->prev_buf[i];
 
 		for (k = 0; k < ENGINE_DECKS; k++)
 			if (pfl[k])
@@ -227,6 +234,7 @@ void engine_process(struct engine *e, float *out, unsigned int n)
 
 		for (d = 0; d < ENGINE_DECKS; d++)
 			deck_render(&e->deck[d], p->deck_buf[d], k);
+		deck_render(&e->preview, p->prev_buf, k);
 		mix_block(e, k);
 		if (e->hp_mode != HP_OFF)
 			cue_block(e, k);
@@ -368,6 +376,8 @@ int engine_open(struct engine *e, const struct engine_opts *o, char **err)
 	e->hp_mode = o->hp_mode;
 	for (i = 0; i < ENGINE_DECKS; i++)
 		deck_set_rate(&e->deck[i], e->rate);
+	deck_set_rate(&e->preview, e->rate);
+	sampler_set_rate(&e->sampler, e->rate);
 
 	ma_device_get_name(&p->dev, ma_device_type_playback, name,
 			   sizeof(name), NULL);

@@ -7,6 +7,7 @@
  */
 #include <string.h>
 
+#include "sclogin.h"
 #include "scview.h"
 
 struct _PdScView {
@@ -16,9 +17,12 @@ struct _PdScView {
 	GtkWidget *entry;
 	GtkWidget *spinner;
 	GtkWidget *likes;
+	GtkWidget *login;
 	GtkWidget *hint;
 	guint pending;
 };
+
+static void update_login(PdScView *v);
 
 G_DEFINE_FINAL_TYPE(PdScView, pd_sc_view, GTK_TYPE_BOX)
 
@@ -124,6 +128,68 @@ static void on_likes(GtkButton *b, PdScView *v)
 	run_query(v, QUERY_LIKES, NULL);
 }
 
+static void login_done(gpointer data)
+{
+	PdScView *v = data;
+
+	update_login(v);
+	run_query(v, QUERY_LIKES, NULL);
+}
+
+static void on_login(GtkButton *b, PdScView *v)
+{
+	if (v->app->cfg.sc_token && *v->app->cfg.sc_token) {
+		sclogin_logout(v->app);
+		update_login(v);
+		return;
+	}
+	sclogin_show(v->app, login_done, v);
+}
+
+static void update_login(PdScView *v)
+{
+	gboolean in = v->app->cfg.sc_token && *v->app->cfg.sc_token;
+
+	gtk_button_set_label(GTK_BUTTON(v->login), in ? "Log out" :
+			     "Log in to SoundCloud");
+	gtk_widget_set_visible(v->likes, in);
+	if (in)
+		gtk_widget_add_css_class(v->login, "logged-in");
+	else
+		gtk_widget_remove_css_class(v->login, "logged-in");
+}
+
+/* Without a client id nothing works, so fetch one quietly at start. */
+struct auto_detect {
+	PdScView *v;
+	char *id;
+};
+
+static gboolean auto_detect_done(gpointer data)
+{
+	struct auto_detect *d = data;
+
+	if (d->id && !(d->v->app->cfg.sc_client_id &&
+		       *d->v->app->cfg.sc_client_id)) {
+		d->v->app->cfg.sc_client_id = d->id;
+		d->id = NULL;
+		config_save(&d->v->app->cfg);
+	}
+	g_free(d->id);
+	g_object_unref(d->v);
+	g_free(d);
+	return G_SOURCE_REMOVE;
+}
+
+static gpointer auto_detect_thread(gpointer data)
+{
+	struct auto_detect *d = data;
+
+	d->id = sc_detect_client_id(NULL);
+	g_idle_add(auto_detect_done, d);
+	return NULL;
+}
+
 static void pd_sc_view_class_init(PdScViewClass *klass)
 {
 }
@@ -144,8 +210,7 @@ GtkWidget *pd_sc_view_new(struct app *app)
 	media = pd_media_view_new(app, app->sc_results,
 				  "Search SoundCloud above, or paste a "
 				  "track, playlist or artist link and press "
-				  "Enter.\n\nA client ID is required, see "
-				  "Preferences → SoundCloud.");
+				  "Enter.\n\nLog in to load your likes.");
 	v->media = PD_MEDIA_VIEW(media);
 
 	v->entry = gtk_entry_new();
@@ -160,6 +225,14 @@ GtkWidget *pd_sc_view_new(struct app *app)
 	gtk_box_append(GTK_BOX(bar), v->entry);
 
 	gtk_box_append(GTK_BOX(bar), pd_media_view_queue_button(v->media));
+	v->login = gtk_button_new_with_label("Log in to SoundCloud");
+	gtk_widget_add_css_class(v->login, "sc-login");
+	gtk_widget_set_focusable(v->login, FALSE);
+	gtk_widget_set_tooltip_text(v->login, "Sign in with your SoundCloud "
+				    "account to reach your likes and "
+				    "playlists");
+	g_signal_connect(v->login, "clicked", G_CALLBACK(on_login), v);
+	gtk_box_append(GTK_BOX(bar), v->login);
 	v->likes = gtk_button_new_with_label("♥ Likes");
 	gtk_widget_set_tooltip_text(v->likes, "Load your liked tracks "
 				    "(needs an OAuth token in Preferences)");
@@ -179,6 +252,14 @@ GtkWidget *pd_sc_view_new(struct app *app)
 					      "Filter results");
 	gtk_box_append(GTK_BOX(v), filter);
 	gtk_box_append(GTK_BOX(v), media);
+	update_login(v);
+	if (!(app->cfg.sc_client_id && *app->cfg.sc_client_id)) {
+		struct auto_detect *d = g_new0(struct auto_detect, 1);
+
+		d->v = g_object_ref(v);
+		g_thread_unref(g_thread_new("pd-sc-detect", auto_detect_thread,
+					    d));
+	}
 	return GTK_WIDGET(v);
 }
 

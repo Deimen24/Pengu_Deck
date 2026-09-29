@@ -92,6 +92,92 @@ static void on_xf_side(GtkButton *b, gpointer data)
 	gtk_button_set_label(b, labels[s]);
 }
 
+static void track_knob(PdMixerView *v, GtkWidget *k);
+static GtkWidget *knob_for(const char *label, double min, double max,
+			   double def, _Atomic float *target,
+			   const char *accent);
+
+static void on_fx_type(GObject *dd, GParamSpec *ps, gpointer data)
+{
+	struct fx *f = data;
+
+	atomic_store(&f->type, (int)gtk_drop_down_get_selected(
+					GTK_DROP_DOWN(dd)));
+}
+
+static void on_fx_on(GtkToggleButton *b, gpointer data)
+{
+	struct fx *f = data;
+
+	atomic_store(&f->on, gtk_toggle_button_get_active(b));
+}
+
+static void on_fx_beats(GtkButton *b, gpointer data)
+{
+	struct fx *f = data;
+	float cur = atomic_load(&f->beats);
+	int i, next = 0;
+	char label[12];
+
+	for (i = 0; i < FX_BEAT_STEPS; i++)
+		if (fabsf(fx_beat_steps[i] - cur) < 1e-3f)
+			next = (i + 1) % FX_BEAT_STEPS;
+	atomic_store(&f->beats, fx_beat_steps[next]);
+	if (fx_beat_steps[next] < 1.0f)
+		g_snprintf(label, sizeof(label), "1/%d",
+			   (int)(1.0f / fx_beat_steps[next]));
+	else
+		g_snprintf(label, sizeof(label), "%d",
+			   (int)fx_beat_steps[next]);
+	gtk_button_set_label(b, label);
+}
+
+static GtkWidget *build_fx(PdMixerView *v, struct deck *d)
+{
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+	GtkWidget *row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+	GtkStringList *names = gtk_string_list_new(NULL);
+	GtkWidget *dd, *k, *b;
+	int i;
+
+	for (i = 0; i < FX_COUNT; i++)
+		gtk_string_list_append(names, fx_name(i));
+	dd = gtk_drop_down_new(G_LIST_MODEL(names), NULL);
+	gtk_widget_add_css_class(dd, "fx-select");
+	g_signal_connect(dd, "notify::selected", G_CALLBACK(on_fx_type),
+			 &d->fx);
+	gtk_box_append(GTK_BOX(box), dd);
+
+	k = knob_for("WET", 0.0, 1.0, 0.5, &d->fx.wet, "#f472b6");
+	pd_knob_set_detent(PD_KNOB(k), FALSE);
+	track_knob(v, k);
+	gtk_box_append(GTK_BOX(row), k);
+	k = knob_for("PRM", 0.0, 1.0, 0.5, &d->fx.param, "#f472b6");
+	pd_knob_set_detent(PD_KNOB(k), FALSE);
+	gtk_widget_set_tooltip_text(k, "Effect parameter: feedback, decay, "
+				    "depth or gate length");
+	track_knob(v, k);
+	gtk_box_append(GTK_BOX(row), k);
+	gtk_box_append(GTK_BOX(box), row);
+
+	row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 2);
+	b = gtk_button_new_with_label("1/2");
+	gtk_widget_add_css_class(b, "fx-beats");
+	gtk_widget_set_focusable(b, FALSE);
+	gtk_widget_set_tooltip_text(b, "Beats: echo time, LFO and gate "
+				    "length");
+	g_signal_connect(b, "clicked", G_CALLBACK(on_fx_beats), &d->fx);
+	gtk_box_append(GTK_BOX(row), b);
+	b = gtk_toggle_button_new_with_label("FX");
+	gtk_widget_add_css_class(b, "fx-on");
+	gtk_widget_set_focusable(b, FALSE);
+	gtk_widget_set_hexpand(b, TRUE);
+	g_signal_connect(b, "toggled", G_CALLBACK(on_fx_on), &d->fx);
+	gtk_box_append(GTK_BOX(row), b);
+	gtk_box_append(GTK_BOX(box), row);
+	return box;
+}
+
 static void on_kill(GtkToggleButton *b, gpointer data)
 {
 	atomic_bool *target = data;
@@ -246,6 +332,7 @@ static GtkWidget *build_strip(PdMixerView *v, int i)
 	gtk_widget_set_tooltip_text(k, "Left: low pass, right: high pass");
 	track_knob(v, k);
 	gtk_box_append(GTK_BOX(knobs), k);
+	gtk_box_append(GTK_BOX(knobs), build_fx(v, d));
 
 	b = gtk_button_new_with_label(i % 2 ? "XF B" : "XF A");
 	gtk_widget_add_css_class(b, "xf-side");

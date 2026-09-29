@@ -26,6 +26,8 @@ struct app {
 	GListStore *queue;		/* PdMediaItem, automix order */
 	GHashTable *played;		/* keys of tracks loaded this session */
 	gboolean loading[ENGINE_DECKS];	/* stream url being resolved */
+	gboolean preview_loading;
+	char *preview_key;		/* item on the preview deck */
 
 	/* installed by the window */
 	void (*toast)(gpointer data, const char *msg);
@@ -44,6 +46,11 @@ gboolean app_open_audio(struct app *a, char **warn);
 /* Load @item into deck @idx, resolving SoundCloud streams as needed. */
 void app_load_item(struct app *a, int idx, PdMediaItem *item);
 void app_unload(struct app *a, int idx);
+
+/* Headphone pre-listen on the preview deck; toggles when @m is playing. */
+void app_preview(struct app *a, PdMediaItem *m);
+void app_preview_stop(struct app *a);
+bool app_previewing(struct app *a, PdMediaItem *m);
 void app_load_path(struct app *a, int idx, const char *path);
 
 /* Tell every list showing @m to rebind its row. */
