@@ -112,6 +112,20 @@ void config_load(struct config *c)
 		c->samples[i] = get_str(kf, "sampler", name);
 	}
 
+	c->rec_format = get_int(kf, "record", "format", 0);
+	c->rec_bitrate = get_int(kf, "record", "bitrate", 192);
+	c->ice_host = get_str(kf, "broadcast", "host");
+	c->ice_port = get_int(kf, "broadcast", "port", 8000);
+	c->ice_mount = get_str(kf, "broadcast", "mount");
+	c->ice_user = get_str(kf, "broadcast", "user");
+	c->ice_password = get_str(kf, "broadcast", "password");
+	c->ice_name = get_str(kf, "broadcast", "name");
+	c->ice_format = get_int(kf, "broadcast", "format", 2);
+	c->ice_bitrate = get_int(kf, "broadcast", "bitrate", 128);
+	c->mic = get_int(kf, "mic", "enabled", 0);
+	c->mic_device = get_str(kf, "mic", "device");
+	c->talkover_db = get_int(kf, "mic", "talkover", -12);
+
 	if (c->backend < BACKEND_AUTO || c->backend > BACKEND_NULL)
 		c->backend = BACKEND_AUTO;
 	if (c->hp_mode < HP_OFF || c->hp_mode > HP_CH34)
@@ -166,6 +180,25 @@ void config_save(const struct config *c)
 		g_key_file_set_string(kf, "sampler", name,
 				      c->samples[i] ? c->samples[i] : "");
 	}
+	g_key_file_set_integer(kf, "record", "format", c->rec_format);
+	g_key_file_set_integer(kf, "record", "bitrate", c->rec_bitrate);
+	g_key_file_set_string(kf, "broadcast", "host",
+			      c->ice_host ? c->ice_host : "");
+	g_key_file_set_integer(kf, "broadcast", "port", c->ice_port);
+	g_key_file_set_string(kf, "broadcast", "mount",
+			      c->ice_mount ? c->ice_mount : "");
+	g_key_file_set_string(kf, "broadcast", "user",
+			      c->ice_user ? c->ice_user : "");
+	g_key_file_set_string(kf, "broadcast", "password",
+			      c->ice_password ? c->ice_password : "");
+	g_key_file_set_string(kf, "broadcast", "name",
+			      c->ice_name ? c->ice_name : "");
+	g_key_file_set_integer(kf, "broadcast", "format", c->ice_format);
+	g_key_file_set_integer(kf, "broadcast", "bitrate", c->ice_bitrate);
+	g_key_file_set_integer(kf, "mic", "enabled", c->mic);
+	g_key_file_set_string(kf, "mic", "device",
+			      c->mic_device ? c->mic_device : "");
+	g_key_file_set_integer(kf, "mic", "talkover", c->talkover_db);
 
 	g_mkdir_with_parents(dir, 0700);
 	if (!g_key_file_save_to_file(kf, path, &err)) {
@@ -187,6 +220,12 @@ void config_clear(struct config *c)
 
 	for (i = 0; i < 8; i++)
 		g_free(c->samples[i]);
+	g_free(c->ice_host);
+	g_free(c->ice_mount);
+	g_free(c->ice_user);
+	g_free(c->ice_password);
+	g_free(c->ice_name);
+	g_free(c->mic_device);
 	g_free(c->device);
 	g_strfreev(c->folders);
 	g_free(c->record_dir);

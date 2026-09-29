@@ -73,6 +73,8 @@ static const struct midi_control controls[] = {
 	{ "sampler7", "Sampler pad 7", MIDI_BUTTON, -1 },
 	{ "sampler8", "Sampler pad 8", MIDI_BUTTON, -1 },
 	{ "sampler_vol", "Sampler volume", MIDI_ABSOLUTE, -1 },
+	{ "mic", "Microphone on/off", MIDI_BUTTON, -1 },
+	{ "mic_gain", "Microphone gain", MIDI_ABSOLUTE, -1 },
 	DECK_CONTROLS(0, "A"),
 	DECK_CONTROLS(1, "B"),
 	DECK_CONTROLS(2, "C"),
@@ -306,6 +308,10 @@ static void global_control(const char *name, int value, bool press)
 		automix_set_enabled(!automix_enabled());
 	else if (g_str_equal(name, "automix_next") && press)
 		automix_next();
+	else if (g_str_equal(name, "mic") && press)
+		atomic_store(&e->mic_on, !atomic_load(&e->mic_on));
+	else if (g_str_equal(name, "mic_gain"))
+		atomic_store(&e->mic_gain, (float)(f * 40.0 - 20.0));
 	else if (g_str_has_prefix(name, "sampler_vol"))
 		atomic_store(&e->sampler.volume, (float)f);
 	else if (g_str_has_prefix(name, "sampler"))

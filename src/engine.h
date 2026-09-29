@@ -9,6 +9,7 @@
 #include <stdbool.h>
 
 #include "deck.h"
+#include "encoder.h"
 #include "sampler.h"
 
 #define ENGINE_DECKS	4	/* always rendered, the UI shows 2 to 4 */
@@ -39,6 +40,15 @@ struct engine_opts {
 	unsigned int rate;	/* 0 for the device default */
 	unsigned int period;	/* frames, 0 for the backend default */
 	enum hp_mode hp_mode;
+	bool mic;		/* open a capture device too */
+	const char *mic_device;	/* NULL for the default */
+};
+
+struct sink_opts {
+	const char *url;	/* file path or icecast:// url */
+	enum enc_format format;
+	int bitrate_kbps;
+	const char *name;	/* stream title */
 };
 
 struct engine_priv;
@@ -55,10 +65,17 @@ struct engine {
 	_Atomic float cue_vol;
 	atomic_int xf_curve;
 
+	/* shared: microphone */
+	atomic_bool mic_on;
+	_Atomic float mic_gain;		/* dB */
+	_Atomic float talkover_db;	/* master ducking while talking, <= 0 */
+	_Atomic float mic_peak;
+
 	/* shared, written by the audio thread */
 	_Atomic float peak_l;
 	_Atomic float peak_r;
 	atomic_uint xruns;
+	bool mic_open;			/* capture device is running */
 
 	/* set by engine_open() */
 	unsigned int rate;
@@ -80,10 +97,20 @@ void engine_close(struct engine *e);
 /* NULL terminated list of playback device names, free with g_strfreev. */
 char **engine_list_devices(enum audio_backend backend);
 
-int engine_record_start(struct engine *e, const char *path, char **err);
-void engine_record_stop(struct engine *e);
-bool engine_recording(struct engine *e);
-double engine_record_seconds(struct engine *e);
+enum sink {
+	SINK_RECORD,
+	SINK_BROADCAST,
+	SINK_COUNT,
+};
+
+int engine_sink_start(struct engine *e, enum sink which,
+		      const struct sink_opts *o, char **err);
+void engine_sink_stop(struct engine *e, enum sink which);
+bool engine_sink_active(struct engine *e, enum sink which);
+/* Seconds since the sink started, or a broken sink reports -1. */
+double engine_sink_seconds(struct engine *e, enum sink which);
+/* NULL terminated capture device names, free with g_strfreev(). */
+char **engine_list_capture_devices(enum audio_backend backend);
 
 /* Mix @n frames into @out (engine->channels interleaved), for tests. */
 void engine_process(struct engine *e, float *out, unsigned int n);

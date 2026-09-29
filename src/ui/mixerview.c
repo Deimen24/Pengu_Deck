@@ -20,6 +20,9 @@ struct _PdMixerView {
 	GtkWidget *pfl[ENGINE_DECKS];
 	GtkWidget *record;
 	GtkWidget *record_label;
+	GtkWidget *live;
+	GtkWidget *live_label;
+	GtkWidget *mic;
 	GtkWidget *fader[ENGINE_DECKS];
 	GPtrArray *knobs;		/* PdKnob, target in "target" data */
 	guint tick;
@@ -212,33 +215,123 @@ static void on_pfl(GtkToggleButton *b, gpointer data)
 	atomic_store(target, gtk_toggle_button_get_active(b));
 }
 
+static void untoggle(PdMixerView *v, GtkToggleButton *b)
+{
+	v->updating = TRUE;
+	gtk_toggle_button_set_active(b, FALSE);
+	v->updating = FALSE;
+}
+
 static void on_record(GtkToggleButton *b, PdMixerView *v)
 {
 	struct app *a = v->app;
+	struct sink_opts o = {
+		.format = CLAMP(a->cfg.rec_format, 0, ENC_COUNT - 1),
+		.bitrate_kbps = a->cfg.rec_bitrate,
+	};
 	GDateTime *now;
 	char *stamp, *path, *err = NULL;
 
 	if (v->updating)
 		return;
 	if (!gtk_toggle_button_get_active(b)) {
-		engine_record_stop(&a->engine);
+		engine_sink_stop(&a->engine, SINK_RECORD);
 		app_toast(a, "Recording saved to %s", a->cfg.record_dir);
 		return;
 	}
 	g_mkdir_with_parents(a->cfg.record_dir, 0755);
 	now = g_date_time_new_now_local();
 	stamp = g_date_time_format(now, "%Y-%m-%d %H-%M-%S");
-	path = g_strdup_printf("%s/Mix %s.wav", a->cfg.record_dir, stamp);
-	if (engine_record_start(&a->engine, path, &err) != 0) {
+	path = g_strdup_printf("%s/Mix %s.%s", a->cfg.record_dir, stamp,
+			       enc_format_ext(o.format));
+	o.url = path;
+	if (engine_sink_start(&a->engine, SINK_RECORD, &o, &err) != 0) {
 		app_toast(a, "Recording failed: %s", err);
 		g_free(err);
-		v->updating = TRUE;
-		gtk_toggle_button_set_active(b, FALSE);
-		v->updating = FALSE;
+		untoggle(v, b);
 	}
 	g_free(path);
 	g_free(stamp);
 	g_date_time_unref(now);
+}
+
+static void on_live(GtkToggleButton *b, PdMixerView *v)
+{
+	struct app *a = v->app;
+	struct config *c = &a->cfg;
+	struct sink_opts o = {
+		.format = c->ice_format == ENC_MP3 ? ENC_MP3 : ENC_OPUS,
+		.bitrate_kbps = c->ice_bitrate,
+		.name = c->ice_name,
+	};
+	char *url, *err = NULL;
+
+	if (v->updating)
+		return;
+	if (!gtk_toggle_button_get_active(b)) {
+		engine_sink_stop(&a->engine, SINK_BROADCAST);
+		app_toast(a, "Broadcast stopped");
+		return;
+	}
+	if (!c->ice_host || !*c->ice_host || !c->ice_mount ||
+	    !*c->ice_mount) {
+		app_toast(a, "Set the Icecast server in Preferences → "
+			  "Record & Stream first");
+		untoggle(v, b);
+		return;
+	}
+	url = g_strdup_printf("icecast://%s:%s@%s:%d/%s",
+			      c->ice_user && *c->ice_user ? c->ice_user :
+			      "source",
+			      c->ice_password ? c->ice_password : "",
+			      c->ice_host, c->ice_port,
+			      *c->ice_mount == '/' ? c->ice_mount + 1 :
+			      c->ice_mount);
+	o.url = url;
+	if (engine_sink_start(&a->engine, SINK_BROADCAST, &o, &err) != 0) {
+		app_toast(a, "Broadcast failed: %s", err);
+		g_free(err);
+		untoggle(v, b);
+	} else {
+		app_toast(a, "Streaming to %s:%d/%s", c->ice_host, c->ice_port,
+			  c->ice_mount);
+	}
+	g_free(url);
+}
+
+static void on_mic(GtkToggleButton *b, PdMixerView *v)
+{
+	struct engine *e = &v->app->engine;
+
+	if (v->updating)
+		return;
+	if (gtk_toggle_button_get_active(b) && !e->mic_open) {
+		app_toast(v->app, "Enable the microphone in Preferences → "
+			  "Audio first");
+		untoggle(v, b);
+		return;
+	}
+	atomic_store(&e->mic_on, gtk_toggle_button_get_active(b));
+}
+
+static void sink_label(struct engine *e, enum sink which, GtkWidget *l,
+		       const char *idle)
+{
+	double s;
+	char *t;
+
+	if (!engine_sink_active(e, which)) {
+		gtk_label_set_text(GTK_LABEL(l), idle);
+		return;
+	}
+	s = engine_sink_seconds(e, which);
+	if (s < 0.0) {
+		gtk_label_set_text(GTK_LABEL(l), "✗ lost");
+		return;
+	}
+	t = g_strdup_printf("● %d:%02d", (int)s / 60, (int)s % 60);
+	gtk_label_set_text(GTK_LABEL(l), t);
+	g_free(t);
 }
 
 static gboolean tick(GtkWidget *w, GdkFrameClock *clock, gpointer data)
@@ -266,16 +359,8 @@ static gboolean tick(GtkWidget *w, GdkFrameClock *clock, gpointer data)
 	}
 	follow_atomics(v);
 
-	if (engine_recording(e)) {
-		double s = engine_record_seconds(e);
-		char *t = g_strdup_printf("● %d:%02d", (int)s / 60,
-					  (int)s % 60);
-
-		gtk_label_set_text(GTK_LABEL(v->record_label), t);
-		g_free(t);
-	} else {
-		gtk_label_set_text(GTK_LABEL(v->record_label), "REC");
-	}
+	sink_label(e, SINK_RECORD, v->record_label, "REC");
+	sink_label(e, SINK_BROADCAST, v->live_label, "LIVE");
 	return G_SOURCE_CONTINUE;
 }
 
@@ -414,9 +499,33 @@ static GtkWidget *build_master(PdMixerView *v)
 	gtk_widget_add_css_class(v->record, "record");
 	gtk_widget_set_focusable(v->record, FALSE);
 	gtk_widget_set_tooltip_text(v->record, "Record the master output "
-				    "to a WAV file");
+				    "(format in Preferences → Record & "
+				    "Stream)");
 	g_signal_connect(v->record, "toggled", G_CALLBACK(on_record), v);
 	gtk_box_append(GTK_BOX(knobs), v->record);
+
+	v->live = gtk_toggle_button_new();
+	v->live_label = gtk_label_new("LIVE");
+	gtk_button_set_child(GTK_BUTTON(v->live), v->live_label);
+	gtk_widget_add_css_class(v->live, "live");
+	gtk_widget_set_focusable(v->live, FALSE);
+	gtk_widget_set_tooltip_text(v->live, "Broadcast to the Icecast "
+				    "server from Preferences → Record & "
+				    "Stream");
+	g_signal_connect(v->live, "toggled", G_CALLBACK(on_live), v);
+	gtk_box_append(GTK_BOX(knobs), v->live);
+
+	gtk_box_append(GTK_BOX(knobs), section_label("MIC"));
+	k = knob_for("GAIN", -20.0, 20.0, 0.0, &e->mic_gain, "#a3e635");
+	track_knob(v, k);
+	gtk_box_append(GTK_BOX(knobs), k);
+	v->mic = gtk_toggle_button_new_with_label("MIC");
+	gtk_widget_add_css_class(v->mic, "mic");
+	gtk_widget_set_focusable(v->mic, FALSE);
+	gtk_widget_set_tooltip_text(v->mic, "Microphone on: talkover ducks "
+				    "the music while you speak");
+	g_signal_connect(v->mic, "toggled", G_CALLBACK(on_mic), v);
+	gtk_box_append(GTK_BOX(knobs), v->mic);
 
 	v->master_meter = pd_meter_new();
 	gtk_widget_set_margin_top(v->master_meter, 12);

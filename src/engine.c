@@ -13,6 +13,9 @@
 #define REC_SECONDS	4
 #define LIMIT		0.98f
 #define LIM_RELEASE	0.99995f
+#define MIC_THRESHOLD	0.03f	/* talkover trigger, linear */
+#define DUCK_ATTACK	0.002f
+#define DUCK_RELEASE	0.00005f
 
 struct engine_priv {
 	ma_context ctx;
@@ -27,13 +30,20 @@ struct engine_priv {
 	float mix[DECK_MAX_BLOCK * 2];
 	float cue[DECK_MAX_BLOCK * 2];
 
-	/* recorder */
+	/* microphone */
+	float mic_buf[DECK_MAX_BLOCK];
+	unsigned int mic_frames;
+	float duck;		/* current ducking gain */
+
+	/* sinks: one ring buffer feeds the recorder and the broadcast */
 	ma_pcm_rb rec_rb;
-	ma_encoder rec_enc;
 	GThread *rec_thread;
 	atomic_bool rec_on;
 	atomic_bool rec_stop;
-	atomic_ullong rec_frames;
+	GMutex sink_lock;
+	struct encoder *sink[SINK_COUNT];
+	atomic_bool sink_broken[SINK_COUNT];
+	atomic_ullong sink_frames[SINK_COUNT];
 	atomic_uint rec_dropped;
 };
 
@@ -49,20 +59,26 @@ void engine_init(struct engine *e)
 	atomic_init(&e->master, 1.0f);
 	atomic_init(&e->cue_mix, 0.0f);
 	atomic_init(&e->cue_vol, 1.0f);
+	atomic_init(&e->mic_gain, 0.0f);
+	atomic_init(&e->talkover_db, -12.0f);
 	e->priv = g_new0(struct engine_priv, 1);
 	e->priv->lim = 1.0f;
+	e->priv->duck = 1.0f;
+	g_mutex_init(&e->priv->sink_lock);
 }
 
 void engine_fini(struct engine *e)
 {
 	int i;
 
-	engine_record_stop(e);
+	engine_sink_stop(e, SINK_RECORD);
+	engine_sink_stop(e, SINK_BROADCAST);
 	engine_close(e);
 	for (i = 0; i < ENGINE_DECKS; i++)
 		deck_fini(&e->deck[i]);
 	deck_fini(&e->preview);
 	sampler_fini(&e->sampler);
+	g_mutex_clear(&e->priv->sink_lock);
 	g_free(e->priv);
 	e->priv = NULL;
 }
@@ -109,10 +125,15 @@ static void mix_block(struct engine *e, unsigned int n)
 		step[k] = (target[k] - p->gain[k]) / (float)n;
 	}
 
+	bool mic = e->mic_open && atomic_load(&e->mic_on);
+	float mic_gain = db_to_gain(atomic_load(&e->mic_gain));
+	float duck_to = db_to_gain(atomic_load(&e->talkover_db));
+	float mic_pk = 0.0f;
+
 	memset(p->mix, 0, 2 * n * sizeof(float));
 	sampler_render(&e->sampler, p->mix, n);
 	for (i = 0; i < 2 * n; i += 2) {
-		float l = p->mix[i], r = p->mix[i + 1], a;
+		float l = p->mix[i], r = p->mix[i + 1], a, m = 0.0f;
 
 		for (k = 0; k < ENGINE_DECKS; k++) {
 			p->gain[k] += step[k];
@@ -121,6 +142,22 @@ static void mix_block(struct engine *e, unsigned int n)
 		}
 		l *= master;
 		r *= master;
+
+		/* Microphone with talkover: duck the mix while talking. */
+		if (mic) {
+			m = (i / 2 < p->mic_frames ? p->mic_buf[i / 2] : 0.0f) *
+			    mic_gain;
+			if (fabsf(m) > mic_pk)
+				mic_pk = fabsf(m);
+			if (fabsf(m) > MIC_THRESHOLD)
+				p->duck += (duck_to - p->duck) * DUCK_ATTACK;
+			else
+				p->duck += (1.0f - p->duck) * DUCK_RELEASE;
+			l = l * p->duck + m;
+			r = r * p->duck + m;
+		} else {
+			p->duck = 1.0f;
+		}
 
 		/* Peak limiter with instant attack and slow release. */
 		a = fmaxf(fabsf(l), fabsf(r));
@@ -143,6 +180,8 @@ static void mix_block(struct engine *e, unsigned int n)
 		atomic_store(&e->peak_l, pk_l);
 	if (pk_r > atomic_load(&e->peak_r))
 		atomic_store(&e->peak_r, pk_r);
+	if (mic_pk > atomic_load(&e->mic_peak))
+		atomic_store(&e->mic_peak, mic_pk);
 }
 
 static void cue_block(struct engine *e, unsigned int n)
@@ -224,13 +263,22 @@ static void output_block(struct engine *e, float *out, unsigned int n)
 	}
 }
 
-void engine_process(struct engine *e, float *out, unsigned int n)
+static void process(struct engine *e, float *out, const float *mic,
+		    unsigned int n)
 {
 	struct engine_priv *p = e->priv;
 	int d;
 
 	while (n) {
 		unsigned int k = n > DECK_MAX_BLOCK ? DECK_MAX_BLOCK : n;
+
+		if (mic) {
+			memcpy(p->mic_buf, mic, k * sizeof(float));
+			mic += k;
+			p->mic_frames = k;
+		} else {
+			p->mic_frames = 0;
+		}
 
 		for (d = 0; d < ENGINE_DECKS; d++)
 			deck_render(&e->deck[d], p->deck_buf[d], k);
@@ -246,10 +294,16 @@ void engine_process(struct engine *e, float *out, unsigned int n)
 	}
 }
 
+void engine_process(struct engine *e, float *out, unsigned int n)
+{
+	process(e, out, NULL, n);
+}
+
 static void data_cb(ma_device *dev, void *out, const void *in, ma_uint32 n)
 {
-	(void)in;
-	engine_process(dev->pUserData, out, n);
+	struct engine *e = dev->pUserData;
+
+	process(e, out, e->mic_open ? in : NULL, n);
 }
 
 static void notify_cb(const ma_device_notification *note)
@@ -336,24 +390,69 @@ static bool find_device(ma_context *ctx, const char *name, ma_device_id *id)
 	return false;
 }
 
+static bool find_capture_device(ma_context *ctx, const char *name,
+				ma_device_id *id)
+{
+	ma_device_info *info;
+	ma_uint32 count, i;
+
+	if (!name || !*name)
+		return false;
+	if (ma_context_get_devices(ctx, NULL, NULL, &info, &count) !=
+	    MA_SUCCESS)
+		return false;
+	for (i = 0; i < count; i++) {
+		if (strcmp(info[i].name, name) == 0) {
+			*id = info[i].id;
+			return true;
+		}
+	}
+	return false;
+}
+
+char **engine_list_capture_devices(enum audio_backend backend)
+{
+	GPtrArray *names = g_ptr_array_new();
+	ma_device_info *info;
+	ma_uint32 count, i;
+	ma_context ctx;
+
+	if (context_init(&ctx, backend) == 0) {
+		if (ma_context_get_devices(&ctx, NULL, NULL, &info, &count) ==
+		    MA_SUCCESS) {
+			for (i = 0; i < count; i++)
+				g_ptr_array_add(names, g_strdup(info[i].name));
+		}
+		ma_context_uninit(&ctx);
+	}
+	g_ptr_array_add(names, NULL);
+	return (char **)g_ptr_array_free(names, FALSE);
+}
+
 int engine_open(struct engine *e, const struct engine_opts *o, char **err)
 {
 	struct engine_priv *p = e->priv;
 	ma_device_config cfg;
-	ma_device_id id;
+	ma_device_id id, mic_id;
 	char name[MA_MAX_DEVICE_NAME_LENGTH + 1];
 	int i;
 
 	engine_close(e);
+	e->mic_open = false;
 	if (context_init(&p->ctx, o->backend) != 0) {
 		*err = g_strdup("Could not initialise any audio backend");
 		return -1;
 	}
 	p->ctx_ok = true;
 
-	cfg = ma_device_config_init(ma_device_type_playback);
+	cfg = ma_device_config_init(o->mic ? ma_device_type_duplex :
+				    ma_device_type_playback);
 	cfg.playback.format = ma_format_f32;
 	cfg.playback.channels = o->hp_mode == HP_CH34 ? 4 : 2;
+	cfg.capture.format = ma_format_f32;
+	cfg.capture.channels = 1;
+	if (o->mic && find_capture_device(&p->ctx, o->mic_device, &mic_id))
+		cfg.capture.pDeviceID = &mic_id;
 	cfg.sampleRate = o->rate;
 	cfg.periodSizeInFrames = o->period;
 	cfg.performanceProfile = ma_performance_profile_low_latency;
@@ -366,9 +465,21 @@ int engine_open(struct engine *e, const struct engine_opts *o, char **err)
 		cfg.playback.pDeviceID = &id;
 
 	if (ma_device_init(&p->ctx, &cfg, &p->dev) != MA_SUCCESS) {
+		if (o->mic) {
+			/* Retry without the microphone. */
+			cfg.deviceType = ma_device_type_playback;
+			if (ma_device_init(&p->ctx, &cfg, &p->dev) ==
+			    MA_SUCCESS) {
+				*err = g_strdup("The microphone could not be "
+						"opened, running without it");
+				goto opened;
+			}
+		}
 		*err = g_strdup("Could not open the audio output device");
 		goto fail;
 	}
+	e->mic_open = o->mic;
+opened:
 	p->dev_ok = true;
 
 	e->rate = p->dev.sampleRate;
@@ -390,7 +501,8 @@ int engine_open(struct engine *e, const struct engine_opts *o, char **err)
 		goto fail;
 	}
 	e->running = true;
-	if (o->hp_mode == HP_CH34 && p->dev.playback.internalChannels < 4) {
+	if (o->hp_mode == HP_CH34 && p->dev.playback.internalChannels < 4 &&
+	    !*err) {
 		/* Never let the cue bus get downmixed into the master. */
 		e->hp_mode = HP_OFF;
 		*err = g_strdup_printf("The output device has only %u "
@@ -420,64 +532,52 @@ void engine_close(struct engine *e)
 	e->running = false;
 }
 
-/* ---- recorder ---------------------------------------------------- */
+/* ---- sinks: recorder and broadcast ------------------------------- */
 
 static gpointer rec_thread(gpointer data)
 {
 	struct engine_priv *p = data;
-	int16_t out[4096 * 2];
+	int k;
 
 	for (;;) {
 		bool stop = atomic_load(&p->rec_stop);
-		ma_uint32 k = 4096, i;
+		ma_uint32 n = 4096;
 		void *src;
 
-		if (ma_pcm_rb_acquire_read(&p->rec_rb, &k, &src) !=
-		    MA_SUCCESS)
-			k = 0;
-		if (k == 0) {
+		if (ma_pcm_rb_acquire_read(&p->rec_rb, &n, &src) != MA_SUCCESS)
+			n = 0;
+		if (n == 0) {
 			if (stop)
 				break;
 			g_usleep(20000);
 			continue;
 		}
-		for (i = 0; i < 2 * k; i++) {
-			float v = ((float *)src)[i] * 32767.0f;
-
-			out[i] = (int16_t)fmaxf(-32768.0f,
-						fminf(32767.0f, v));
+		g_mutex_lock(&p->sink_lock);
+		for (k = 0; k < SINK_COUNT; k++) {
+			if (!p->sink[k])
+				continue;
+			if (!encoder_write(p->sink[k], src, n))
+				atomic_store(&p->sink_broken[k], true);
+			else
+				atomic_fetch_add(&p->sink_frames[k], n);
 		}
-		ma_pcm_rb_commit_read(&p->rec_rb, k);
-		ma_encoder_write_pcm_frames(&p->rec_enc, out, k, NULL);
-		atomic_fetch_add(&p->rec_frames, k);
+		g_mutex_unlock(&p->sink_lock);
+		ma_pcm_rb_commit_read(&p->rec_rb, n);
 	}
 	return NULL;
 }
 
-int engine_record_start(struct engine *e, const char *path, char **err)
+static int ring_start(struct engine *e, char **err)
 {
 	struct engine_priv *p = e->priv;
-	ma_encoder_config cfg;
 
 	if (atomic_load(&p->rec_on))
 		return 0;
-	if (!e->running) {
-		*err = g_strdup("The audio device is not running");
-		return -1;
-	}
-	cfg = ma_encoder_config_init(ma_encoding_format_wav, ma_format_s16,
-				     2, e->rate);
-	if (ma_encoder_init_file(path, &cfg, &p->rec_enc) != MA_SUCCESS) {
-		*err = g_strdup_printf("Could not create %s", path);
-		return -1;
-	}
 	if (ma_pcm_rb_init(ma_format_f32, 2, e->rate * REC_SECONDS, NULL,
 			   NULL, &p->rec_rb) != MA_SUCCESS) {
-		ma_encoder_uninit(&p->rec_enc);
 		*err = g_strdup("Out of memory");
 		return -1;
 	}
-	atomic_store(&p->rec_frames, 0);
 	atomic_store(&p->rec_dropped, 0);
 	atomic_store(&p->rec_stop, false);
 	p->rec_thread = g_thread_new("pd-recorder", rec_thread, p);
@@ -485,11 +585,11 @@ int engine_record_start(struct engine *e, const char *path, char **err)
 	return 0;
 }
 
-void engine_record_stop(struct engine *e)
+static void ring_stop(struct engine *e)
 {
 	struct engine_priv *p = e->priv;
 
-	if (!p || !atomic_load(&p->rec_on))
+	if (!atomic_load(&p->rec_on))
 		return;
 	atomic_store(&p->rec_on, false);
 	/* Let a callback that saw rec_on finish its write. */
@@ -497,18 +597,69 @@ void engine_record_stop(struct engine *e)
 	atomic_store(&p->rec_stop, true);
 	g_thread_join(p->rec_thread);
 	p->rec_thread = NULL;
-	ma_encoder_uninit(&p->rec_enc);
 	ma_pcm_rb_uninit(&p->rec_rb);
 }
 
-bool engine_recording(struct engine *e)
+int engine_sink_start(struct engine *e, enum sink which,
+		      const struct sink_opts *o, char **err)
 {
-	return atomic_load(&e->priv->rec_on);
+	struct engine_priv *p = e->priv;
+	struct encoder *enc;
+	int k;
+
+	if (p->sink[which])
+		return 0;
+	if (!e->running) {
+		*err = g_strdup("The audio device is not running");
+		return -1;
+	}
+	enc = encoder_open(o->url, o->format, e->rate, o->bitrate_kbps,
+			   o->name, err);
+	if (!enc)
+		return -1;
+	if (ring_start(e, err) != 0) {
+		encoder_close(enc);
+		return -1;
+	}
+	g_mutex_lock(&p->sink_lock);
+	p->sink[which] = enc;
+	atomic_store(&p->sink_frames[which], 0);
+	atomic_store(&p->sink_broken[which], false);
+	g_mutex_unlock(&p->sink_lock);
+	(void)k;
+	return 0;
 }
 
-double engine_record_seconds(struct engine *e)
+void engine_sink_stop(struct engine *e, enum sink which)
 {
-	if (!e->rate)
+	struct engine_priv *p = e->priv;
+	struct encoder *enc;
+	bool any = false;
+	int k;
+
+	if (!p || !p->sink[which])
+		return;
+	g_mutex_lock(&p->sink_lock);
+	enc = p->sink[which];
+	p->sink[which] = NULL;
+	for (k = 0; k < SINK_COUNT; k++)
+		any |= p->sink[k] != NULL;
+	g_mutex_unlock(&p->sink_lock);
+	if (!any)
+		ring_stop(e);
+	encoder_close(enc);
+}
+
+bool engine_sink_active(struct engine *e, enum sink which)
+{
+	return e->priv && e->priv->sink[which] != NULL;
+}
+
+double engine_sink_seconds(struct engine *e, enum sink which)
+{
+	if (!e->rate || !e->priv)
 		return 0.0;
-	return (double)atomic_load(&e->priv->rec_frames) / e->rate;
+	if (atomic_load(&e->priv->sink_broken[which]))
+		return -1.0;
+	return (double)atomic_load(&e->priv->sink_frames[which]) / e->rate;
 }

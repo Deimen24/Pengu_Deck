@@ -53,6 +53,7 @@ core_src = files(
 	'src/decoder.c',
 	'src/deck.c',
 	'src/dsp.c',
+	'src/encoder.c',
 	'src/engine.c',
 	'src/fx.c',
 	'src/library.c',

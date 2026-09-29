@@ -30,6 +30,19 @@ struct prefs {
 	GtkWidget *token;
 	GtkWidget *detect;
 	GtkWidget *cache_label;
+	GtkWidget *mic;
+	GtkWidget *mic_device;
+	GtkWidget *talkover;
+	GtkWidget *rec_format;
+	GtkWidget *rec_bitrate;
+	GtkWidget *ice_host;
+	GtkWidget *ice_port;
+	GtkWidget *ice_mount;
+	GtkWidget *ice_user;
+	GtkWidget *ice_password;
+	GtkWidget *ice_name;
+	GtkWidget *ice_format;
+	GtkWidget *ice_bitrate;
 	GtkWidget *status;
 	GtkWidget *midi_status;
 	GtkWidget *midi_grid;
@@ -149,9 +162,31 @@ static void fill_devices(struct prefs *p)
 	g_strfreev(names);
 }
 
+static void fill_mic_devices(struct prefs *p)
+{
+	guint b = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->backend));
+	char **names = engine_list_capture_devices((enum audio_backend)b);
+	GtkStringList *list = gtk_string_list_new(NULL);
+	guint i, sel = 0;
+
+	gtk_string_list_append(list, "Default microphone");
+	for (i = 0; names[i]; i++) {
+		gtk_string_list_append(list, names[i]);
+		if (p->app->cfg.mic_device &&
+		    strcmp(names[i], p->app->cfg.mic_device) == 0)
+			sel = i + 1;
+	}
+	gtk_drop_down_set_model(GTK_DROP_DOWN(p->mic_device),
+				G_LIST_MODEL(list));
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->mic_device), sel);
+	g_object_unref(list);
+	g_strfreev(names);
+}
+
 static void on_backend(GObject *d, GParamSpec *ps, struct prefs *p)
 {
 	fill_devices(p);
+	fill_mic_devices(p);
 }
 
 /* ---- folders ----------------------------------------------------- */
@@ -329,6 +364,42 @@ static void on_apply(GtkButton *b, struct prefs *p)
 	c->period = period_values[gtk_drop_down_get_selected(
 					GTK_DROP_DOWN(p->period))];
 	c->hp_mode = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->hp_mode));
+	c->mic = gtk_check_button_get_active(GTK_CHECK_BUTTON(p->mic));
+	{
+		guint md = gtk_drop_down_get_selected(
+					GTK_DROP_DOWN(p->mic_device));
+
+		g_free(c->mic_device);
+		c->mic_device = md > 0 ? dropdown_text(p->mic_device) : NULL;
+	}
+	c->talkover_db = gtk_spin_button_get_value_as_int(
+					GTK_SPIN_BUTTON(p->talkover));
+	c->rec_format = gtk_drop_down_get_selected(
+					GTK_DROP_DOWN(p->rec_format));
+	c->rec_bitrate = gtk_spin_button_get_value_as_int(
+					GTK_SPIN_BUTTON(p->rec_bitrate));
+	g_free(c->ice_host);
+	c->ice_host = g_strdup(gtk_editable_get_text(
+					GTK_EDITABLE(p->ice_host)));
+	c->ice_port = gtk_spin_button_get_value_as_int(
+					GTK_SPIN_BUTTON(p->ice_port));
+	g_free(c->ice_mount);
+	c->ice_mount = g_strdup(gtk_editable_get_text(
+					GTK_EDITABLE(p->ice_mount)));
+	g_free(c->ice_user);
+	c->ice_user = g_strdup(gtk_editable_get_text(
+					GTK_EDITABLE(p->ice_user)));
+	g_free(c->ice_password);
+	c->ice_password = g_strdup(gtk_editable_get_text(
+					GTK_EDITABLE(p->ice_password)));
+	g_free(c->ice_name);
+	c->ice_name = g_strdup(gtk_editable_get_text(
+					GTK_EDITABLE(p->ice_name)));
+	c->ice_format = gtk_drop_down_get_selected(
+				GTK_DROP_DOWN(p->ice_format)) == 0 ? ENC_MP3 :
+				ENC_OPUS;
+	c->ice_bitrate = gtk_spin_button_get_value_as_int(
+					GTK_SPIN_BUTTON(p->ice_bitrate));
 	c->xf_curve = gtk_drop_down_get_selected(GTK_DROP_DOWN(p->xf_curve));
 	c->pitch_range = range_values[gtk_drop_down_get_selected(
 					GTK_DROP_DOWN(p->pitch_range))];
@@ -352,15 +423,17 @@ static void on_apply(GtkButton *b, struct prefs *p)
 					GTK_EDITABLE(p->client_id)));
 	c->sc_token = g_strdup(gtk_editable_get_text(
 					GTK_EDITABLE(p->token)));
+	audio_changed = c->backend != old.backend ||
+			g_strcmp0(c->device, old.device) != 0 ||
+			c->rate != old.rate || c->period != old.period ||
+			c->hp_mode != old.hp_mode || c->mic != old.mic ||
+			g_strcmp0(c->mic_device, old.mic_device) != 0;
+	atomic_store(&a->engine.talkover_db, (float)c->talkover_db);
 	g_free(old.device);
 	g_free(old.record_dir);
 	g_free(old.sc_client_id);
 	g_free(old.sc_token);
-
-	audio_changed = c->backend != old.backend ||
-			g_strcmp0(c->device, old.device) != 0 ||
-			c->rate != old.rate || c->period != old.period ||
-			c->hp_mode != old.hp_mode;
+	g_free(old.mic_device);
 	config_save(c);
 
 	if (audio_changed) {
@@ -428,16 +501,97 @@ static void build_audio(struct prefs *p, GtkWidget *nb)
 							 c->hp_mode));
 	p->xf_curve = row(g, 5, "Crossfader curve", dropdown(xf_names,
 							     c->xf_curve));
+	p->mic = gtk_check_button_new_with_label("Microphone input with "
+						 "talkover");
+	gtk_check_button_set_active(GTK_CHECK_BUTTON(p->mic), c->mic);
+	row(g, 6, "", p->mic);
+	p->mic_device = row(g, 7, "Microphone",
+			    gtk_drop_down_new(NULL, NULL));
+	p->talkover = gtk_spin_button_new_with_range(-40, 0, 1);
+	gtk_spin_button_set_value(GTK_SPIN_BUTTON(p->talkover),
+				  c->talkover_db);
+	gtk_widget_set_tooltip_text(p->talkover, "How much the music is "
+				    "turned down while you talk, in dB");
+	row(g, 8, "Talkover", p->talkover);
+	fill_mic_devices(p);
+
 	l = gtk_label_new("On CachyOS / Arch with PipeWire the automatic "
 			  "backend uses pipewire-pulse. For the lowest "
 			  "latency pick JACK and run with pipewire-jack, or "
 			  "ALSA with a direct hw: device.");
 	gtk_label_set_wrap(GTK_LABEL(l), TRUE);
 	gtk_widget_add_css_class(l, "dim-label");
-	gtk_grid_attach(GTK_GRID(g), l, 0, 6, 2, 1);
+	gtk_grid_attach(GTK_GRID(g), l, 0, 9, 2, 1);
 	fill_devices(p);
 	g_signal_connect(p->backend, "notify::selected",
 			 G_CALLBACK(on_backend), p);
+}
+
+static GtkWidget *entry_with(const char *text)
+{
+	GtkWidget *e = gtk_entry_new();
+
+	gtk_editable_set_text(GTK_EDITABLE(e), text ? text : "");
+	return e;
+}
+
+static void build_stream(struct prefs *p, GtkWidget *nb)
+{
+	struct config *c = &p->app->cfg;
+	GtkWidget *g = page(nb, "Record & Stream");
+	GtkStringList *names = gtk_string_list_new(NULL);
+	static const char *const ice_fmts[] = { "MP3", "Opus (Ogg)", NULL };
+	GtkWidget *l;
+	int i;
+
+	for (i = 0; i < ENC_COUNT; i++) {
+		char *n = g_strdup_printf("%s%s", enc_format_name(i),
+					  enc_format_available(i) ? "" :
+					  " (not in this FFmpeg)");
+
+		gtk_string_list_append(names, n);
+		g_free(n);
+	}
+	p->rec_format = gtk_drop_down_new(G_LIST_MODEL(names), NULL);
+	gtk_drop_down_set_selected(GTK_DROP_DOWN(p->rec_format),
+				   CLAMP(c->rec_format, 0, ENC_COUNT - 1));
+	row(g, 0, "Recording format", p->rec_format);
+	p->rec_bitrate = gtk_spin_button_new_with_range(64, 320, 32);
+	gtk_spin_button_set_value(GTK_SPIN_BUTTON(p->rec_bitrate),
+				  c->rec_bitrate);
+	row(g, 1, "Bitrate (kbps, MP3/Opus)", p->rec_bitrate);
+
+	l = gtk_label_new("ICECAST BROADCAST");
+	gtk_widget_add_css_class(l, "section-label");
+	gtk_widget_set_margin_top(l, 12);
+	gtk_grid_attach(GTK_GRID(g), l, 0, 2, 2, 1);
+	p->ice_host = row(g, 3, "Server", entry_with(c->ice_host));
+	p->ice_port = gtk_spin_button_new_with_range(1, 65535, 1);
+	gtk_spin_button_set_value(GTK_SPIN_BUTTON(p->ice_port), c->ice_port);
+	row(g, 4, "Port", p->ice_port);
+	p->ice_mount = row(g, 5, "Mount point", entry_with(c->ice_mount));
+	gtk_entry_set_placeholder_text(GTK_ENTRY(p->ice_mount), "live.mp3");
+	p->ice_user = row(g, 6, "User", entry_with(c->ice_user));
+	gtk_entry_set_placeholder_text(GTK_ENTRY(p->ice_user), "source");
+	p->ice_password = gtk_password_entry_new();
+	gtk_password_entry_set_show_peek_icon(
+			GTK_PASSWORD_ENTRY(p->ice_password), TRUE);
+	gtk_editable_set_text(GTK_EDITABLE(p->ice_password),
+			      c->ice_password ? c->ice_password : "");
+	row(g, 7, "Password", p->ice_password);
+	p->ice_name = row(g, 8, "Stream name", entry_with(c->ice_name));
+	p->ice_format = dropdown(ice_fmts, c->ice_format == ENC_MP3 ? 0 : 1);
+	row(g, 9, "Stream format", p->ice_format);
+	p->ice_bitrate = gtk_spin_button_new_with_range(32, 320, 16);
+	gtk_spin_button_set_value(GTK_SPIN_BUTTON(p->ice_bitrate),
+				  c->ice_bitrate);
+	row(g, 10, "Stream bitrate", p->ice_bitrate);
+	l = gtk_label_new("Works with Icecast 2 and Shoutcast compatible "
+			  "servers. Press LIVE in the mixer to go on air; "
+			  "REC and LIVE can run at the same time.");
+	gtk_label_set_wrap(GTK_LABEL(l), TRUE);
+	gtk_widget_add_css_class(l, "dim-label");
+	gtk_grid_attach(GTK_GRID(g), l, 0, 11, 2, 1);
 }
 
 static void build_library(struct prefs *p, GtkWidget *nb)
@@ -724,6 +878,7 @@ void prefs_show(struct app *app, GCallback applied, gpointer data)
 	build_library(p, nb);
 	build_soundcloud(p, nb);
 	build_decks(p, nb);
+	build_stream(p, nb);
 	build_midi(p, nb);
 	gtk_widget_set_vexpand(nb, TRUE);
 	gtk_box_append(GTK_BOX(box), nb);

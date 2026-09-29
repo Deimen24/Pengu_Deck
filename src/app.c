@@ -126,9 +126,12 @@ gboolean app_open_audio(struct app *a, char **warn)
 		.rate = a->cfg.rate,
 		.period = a->cfg.period,
 		.hp_mode = a->cfg.hp_mode,
+		.mic = a->cfg.mic,
+		.mic_device = a->cfg.mic_device,
 	};
 	char *err = NULL;
 
+	atomic_store(&a->engine.talkover_db, (float)a->cfg.talkover_db);
 	*warn = NULL;
 	if (engine_open(&a->engine, &o, &err) == 0) {
 		*warn = err;

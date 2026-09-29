@@ -5,6 +5,33 @@ music folders and streams tracks straight from SoundCloud into a deck.
 
 ![Pengu Deck](docs/screenshot.png)
 
+## How it compares
+
+Feature set checked against rekordbox, Serato DJ Pro, Traktor Pro 4,
+VirtualDJ, djay Pro, Engine DJ and Mixxx (September 2026):
+
+| Feature | Pengu Deck | Notes |
+|---|---|---|
+| 2–4 decks, hot cues, beat loops, loop roll, slip, censor, reverse | ✓ | switch deck count live |
+| BPM / beat grid detection, grid editing, tap tempo | ✓ | |
+| Key detection (Camelot), key shift, keylock | ✓ | Rubber Band |
+| Sync lock, beat jump, quantize | ✓ | |
+| Effects unit per channel | ✓ | echo, reverb, flanger, phaser, crush, gate |
+| Sampler pads | ✓ | 8 pads |
+| Automix | ✓ | queue, tempo sync, adjustable transition |
+| Auto gain / replay gain | ✓ | |
+| Library: playlists, history, smart search, preview deck | ✓ | bpm:, key:, genre: tokens |
+| Rekordbox XML import (cues, grid, playlists) | ✓ | |
+| Recording WAV / FLAC / MP3 / Opus | ✓ | |
+| Icecast / Shoutcast broadcasting | ✓ | |
+| Microphone with talkover | ✓ | |
+| MIDI controllers with learn | ✓ | Pioneer DDJ, CDJ MIDI mode, any class compliant device |
+| SoundCloud streaming with in-app login and cache | ✓ | Serato / djay / VirtualDJ have paid streaming tiers |
+| Stems separation | ✗ | needs an ML model, planned |
+| DVS timecode vinyl | ✗ | planned |
+| Video mixing, karaoke, lighting | ✗ | out of scope |
+| Ableton Link | ✗ | |
+
 ## Features
 
 - Two, three or four decks, switchable at any time without interrupting
@@ -27,9 +54,23 @@ music folders and streams tracks straight from SoundCloud into a deck.
   adjustable transition
 - MIDI controllers with a learn mode (Pioneer DDJ, CDJs in MIDI mode
   and any class compliant device, hot plugged, no driver needed)
+- Per channel effects unit (echo, reverb, flanger, phaser, bit crusher,
+  trance gate) synced to the deck tempo, with wet and parameter knobs
+- Eight pad sampler (one shot, loop, hold)
+- Beat jump, slip mode, loop rolls, censor, reverse, quantize, sync
+  lock, key shift and key detection with Camelot codes
+- Beat grid editing: tap tempo, set downbeat, nudge, halve / double,
+  re-analyse
+- Auto gain to -18 dBFS RMS
+- Library sidebar with playlists (crates) and play history, M3U and
+  set list export, headphone pre-listen on every row, search tokens
+  `bpm:120-128`, `key:8A`, `genre:techno`
+- Rekordbox XML import: cues, beat grid, tags and playlists
+- Recording to WAV, FLAC, MP3 or Opus and Icecast / Shoutcast
+  broadcasting at the same time
+- Microphone input with talkover ducking
 - Headphone cueing: split stereo output (left = master, right = cue) or a
   4 channel audio interface (3/4 = cue), with cue/master mix
-- Record the master output to WAV
 - Local library with tag reading, caching, search and sorting
 - SoundCloud: search, paste track / playlist / artist links, load your
   likes; tracks you load or queue are cached on disk in the background
@@ -135,18 +176,17 @@ is not supported.
 ## SoundCloud
 
 SoundCloud has no public API keys anymore, so Pengu Deck talks to the
-same `api-v2` endpoints the web player uses:
+same `api-v2` endpoints the web player uses. The public client ID is
+detected automatically at start.
 
-1. Open **Preferences → SoundCloud** and press **Detect**. This reads the
-   public client ID out of the soundcloud.com player scripts. The ID
-   changes every few weeks; press Detect again when searches start
-   failing.
+1. Press **Log in to SoundCloud** in the SoundCloud tab and sign in in
+   the embedded browser window (WebKitGTK). Your session token is picked
+   up automatically and your likes load right away. **Log out** clears
+   the session again. Without WebKitGTK, paste an OAuth token in
+   **Preferences → SoundCloud** instead.
 2. Search, or paste a track / set / artist link into the SoundCloud tab
-   and press Enter. Double click or drag a result onto a deck.
-3. To load **your likes**, paste your OAuth token as well (log in on
-   soundcloud.com, open the browser dev tools and copy the
-   `oauth_token` cookie). It is stored in
-   `~/.config/pengu-deck/settings.ini` with mode 0600.
+   and press Enter. Double click or drag a result onto a deck, or press
+   the headphone button to pre-listen.
 
 Streams are fetched from SoundCloud's transcoding endpoints (progressive
 MP3 preferred, HLS otherwise) and decoded progressively, so playback
@@ -159,6 +199,17 @@ ahead of time and **Preferences → SoundCloud** shows the cache size and
 clears it.
 Tracks limited to previews by their rights holders play as 30 second
 snippets and are marked "(preview)". Encrypted streams cannot be played.
+
+## Recording, broadcasting and microphone
+
+**REC** in the mixer records the master to
+`~/Music/Pengu Deck Mixes` in the format chosen in **Preferences →
+Record & Stream** (WAV, FLAC, MP3 or Opus, encoders from FFmpeg).
+**LIVE** streams the master to the Icecast or Shoutcast server set up
+on the same page (MP3 or Opus); both can run at once. Enable the
+microphone in **Preferences → Audio**, then **MIC** in the mixer opens
+it with talkover: the music ducks by the configured amount while you
+speak.
 
 ## Audio setup
 

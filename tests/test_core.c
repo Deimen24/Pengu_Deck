@@ -15,6 +15,7 @@
 #include "decoder.h"
 #include "deck.h"
 #include "dsp.h"
+#include "encoder.h"
 #include "engine.h"
 #include "fx.h"
 #include "playlists.h"
@@ -239,14 +240,17 @@ static void test_rekordbox(void)
 		"<PLAYLISTS><NODE Type=\"0\" Name=\"ROOT\" Count=\"1\">"
 		"<NODE Name=\"Peak time\" Type=\"1\" KeyType=\"0\" Entries=\"1\">"
 		"<TRACK Key=\"7\"/></NODE></NODE></PLAYLISTS></DJ_PLAYLISTS>";
-	char *path = g_build_filename(g_get_tmp_dir(), "pd-rb.xml", NULL);
+	char *dir = g_dir_make_tmp("pd-test-XXXXXX", NULL);
+	char *path = g_build_filename(dir, "pd-rb.xml", NULL);
 	struct rb_import out;
 	struct track_info info;
 	struct playlist *p;
 	GError *err = NULL;
 	PdMediaItem *m;
 
-	g_setenv("XDG_DATA_HOME", g_get_tmp_dir(), TRUE);
+	/* Private data dir: CI runs the tests as different users. */
+	g_assert_nonnull(dir);
+	g_setenv("XDG_DATA_HOME", dir, TRUE);
 	cuestore_open();
 	playlists_open();
 	g_assert_true(g_file_set_contents(path, xml, -1, NULL));
@@ -277,6 +281,43 @@ static void test_rekordbox(void)
 	g_assert_null(playlists_find("Peak time"));
 	playlists_close();
 	cuestore_close();
+	g_unlink(path);
+	g_free(path);
+	g_free(dir);
+}
+
+static void test_encoder(void)
+{
+	char *path = g_build_filename(g_get_tmp_dir(), "pd-enc.flac", NULL);
+	struct encoder *e;
+	char *err = NULL;
+	float buf[1024 * 2];
+	struct track *t;
+	int i, j;
+
+	if (!enc_format_available(ENC_FLAC)) {
+		g_test_skip("no flac encoder");
+		g_free(path);
+		return;
+	}
+	e = encoder_open(path, ENC_FLAC, RATE, 0, NULL, &err);
+	g_assert_no_errno(e ? 0 : -1);
+	g_assert_nonnull(e);
+	for (i = 0; i < 50; i++) {
+		for (j = 0; j < 1024; j++)
+			buf[2 * j] = buf[2 * j + 1] =
+				0.5f * sinf(2.0f * (float)M_PI * 440.0f *
+					    (i * 1024 + j) / RATE);
+		g_assert_true(encoder_write(e, buf, 1024));
+	}
+	encoder_close(e);
+
+	/* decode it back: 50 * 1024 frames of audio */
+	t = track_new(path, path, RATE);
+	atomic_store(&t->analysed, true);
+	g_assert_cmpint(decoder_run(t), ==, 0);
+	g_assert_cmpint(labs((long)track_frames(t) - 50 * 1024), <, 64);
+	track_unref(t);
 	g_unlink(path);
 	g_free(path);
 }
@@ -535,6 +576,7 @@ int main(int argc, char **argv)
 	g_test_add_func("/analyze/fold", test_bpm_fold);
 	g_test_add_func("/analyze/key", test_key);
 	g_test_add_func("/fx/all", test_fx);
+	g_test_add_func("/encoder/flac", test_encoder);
 	g_test_add_func("/library/rekordbox", test_rekordbox);
 	g_test_add_func("/sampler/oneshot", test_sampler);
 	g_test_add_func("/analyze/gain", test_gain);

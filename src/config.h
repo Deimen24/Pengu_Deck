@@ -41,6 +41,23 @@ struct config {
 
 	/* sampler */
 	char *samples[8];
+
+	/* recording and broadcasting */
+	int rec_format;		/* enum enc_format */
+	int rec_bitrate;
+	char *ice_host;
+	int ice_port;
+	char *ice_mount;
+	char *ice_user;
+	char *ice_password;
+	char *ice_name;
+	int ice_format;		/* ENC_MP3 or ENC_OPUS */
+	int ice_bitrate;
+
+	/* microphone */
+	gboolean mic;
+	char *mic_device;
+	int talkover_db;
 };
 
 void config_load(struct config *c);
