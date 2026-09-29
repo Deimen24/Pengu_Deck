@@ -14,7 +14,6 @@ BuildRequires:  pkgconfig(libavformat) pkgconfig(libavcodec)
 BuildRequires:  pkgconfig(libavutil) pkgconfig(libswresample)
 BuildRequires:  pkgconfig(rubberband)
 BuildRequires:  pkgconfig(libpulse) pkgconfig(alsa)
-BuildRequires:  pkgconfig(webkitgtk-6.0)
 BuildRequires:  desktop-file-utils
 # Fedora's ffmpeg-free decodes MP3, FLAC, Vorbis, Opus and AAC; the RPM
 # Fusion ffmpeg-devel works too when it is installed instead.
@@ -29,7 +28,7 @@ keylock, headphone cueing, recording and SoundCloud streaming.
 %autosetup -n Pengu_Deck-%{version}
 
 %build
-%meson -Dkeylock=enabled -Dsclogin=enabled
+%meson -Dkeylock=enabled
 %meson_build
 
 %check

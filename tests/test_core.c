@@ -20,6 +20,7 @@
 #include "fx.h"
 #include "playlists.h"
 #include "sampler.h"
+#include "scauth.h"
 #include "soundcloud.h"
 #include "track.h"
 
@@ -547,41 +548,36 @@ static void test_decoder(void)
 static void test_sc_parse(void)
 {
 	static const char json[] =
-		"{\"collection\":[{\"id\":123,\"title\":\"Song\","
-		"\"duration\":30000,\"full_duration\":200000,"
-		"\"genre\":\"Techno\",\"policy\":\"ALLOW\","
+		"{\"collection\":[{\"urn\":\"soundcloud:tracks:123\","
+		"\"title\":\"Song\",\"duration\":200000,\"genre\":\"Techno\","
+		"\"access\":\"playable\","
 		"\"permalink_url\":\"https://soundcloud.com/x/y\","
-		"\"track_authorization\":\"abc\","
-		"\"user\":{\"username\":\"DJ X\"},"
-		"\"media\":{\"transcodings\":["
-		"{\"url\":\"https://a/hls\",\"snipped\":false,"
-		"\"format\":{\"protocol\":\"hls\",\"mime_type\":\"audio/mpeg\"}},"
-		"{\"url\":\"https://a/prog\",\"snipped\":false,"
-		"\"format\":{\"protocol\":\"progressive\","
-		"\"mime_type\":\"audio/mpeg\"}},"
-		"{\"url\":\"https://a/drm\",\"snipped\":false,"
-		"\"format\":{\"protocol\":\"encrypted-hls\","
-		"\"mime_type\":\"audio/mpeg\"}}]}},"
-		"{\"id\":5,\"kind\":\"track\"},"
-		"{\"track\":{\"id\":9,\"title\":\"Liked\",\"policy\":\"SNIP\","
-		"\"media\":{\"transcodings\":[]}}}]}";
+		"\"user\":{\"username\":\"DJ X\"}},"
+		"{\"urn\":\"soundcloud:tracks:5\",\"kind\":\"track\"},"
+		"{\"id\":9,\"title\":\"Snippet\",\"access\":\"preview\"},"
+		"{\"urn\":\"soundcloud:tracks:7\",\"title\":\"Locked\","
+		"\"access\":\"blocked\"}],"
+		"\"next_href\":\"https://api.soundcloud.com/tracks?cursor=1\"}";
 	GError *err = NULL;
 	GPtrArray *res = sc_parse_tracks(json, &err);
 	PdMediaItem *m;
 
 	g_assert_no_error(err);
 	g_assert_nonnull(res);
-	g_assert_cmpuint(res->len, ==, 2);
+	g_assert_cmpuint(res->len, ==, 3);
 	m = res->pdata[0];
 	g_assert_cmpstr(m->key, ==, "soundcloud:123");
 	g_assert_cmpstr(m->title, ==, "Song");
 	g_assert_cmpstr(m->artist, ==, "DJ X");
-	g_assert_cmpstr(m->location, ==, "https://a/prog");
+	g_assert_cmpstr(m->location, ==, "soundcloud:tracks:123");
 	g_assert_cmpfloat(m->duration, ==, 200.0);
 	g_assert_false(m->preview);
 	m = res->pdata[1];
-	g_assert_cmpstr(m->title, ==, "Liked");
+	g_assert_cmpstr(m->key, ==, "soundcloud:9");
+	g_assert_cmpstr(m->location, ==, "soundcloud:tracks:9");
 	g_assert_true(m->preview);
+	m = res->pdata[2];
+	g_assert_cmpstr(m->title, ==, "Locked");
 	g_assert_null(m->location);
 	g_ptr_array_unref(res);
 
@@ -591,36 +587,35 @@ static void test_sc_parse(void)
 	g_clear_error(&err);
 }
 
-static void test_sc_session(void)
+static void test_sc_tokens(void)
 {
-	char *tok, *dd;
+	struct sc_tokens t;
+	GError *err = NULL;
+	gint64 now = g_get_real_time() / G_USEC_PER_SEC;
 
-	/* a cookie header line from the developer tools */
-	g_assert_true(sc_parse_session("sc_anonymous_id=1; oauth_token="
-		"2-306106-1234567-AbCdEf1234; datadome=ABCDEFGHIJKLMNOPQRSTUV"
-		"WXYZ0123456789~abc_def", &tok, &dd));
-	g_assert_cmpstr(tok, ==, "2-306106-1234567-AbCdEf1234");
-	g_assert_cmpstr(dd, ==, "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789~abc_def");
-	g_free(tok);
-	g_free(dd);
+	g_assert_true(sc_parse_token_reply("{\"access_token\":\"abc\","
+		"\"refresh_token\":\"def\",\"expires_in\":3599,"
+		"\"token_type\":\"Bearer\"}", &t, &err));
+	g_assert_no_error(err);
+	g_assert_cmpstr(t.access, ==, "abc");
+	g_assert_cmpstr(t.refresh, ==, "def");
+	g_assert_cmpint(t.expires_at, >=, now + 3590);
+	sc_tokens_clear(&t);
 
-	/* "Copy as cURL" carries the token in the Authorization header */
-	g_assert_true(sc_parse_session("curl 'https://api-v2.soundcloud.com/"
-		"me' -H 'Authorization: OAuth 2-1-2-XyZ' -H 'Cookie: "
-		"datadome=\"QWERTYUIOPASDFGHJKLZXCVBNM12\"'", &tok, &dd));
-	g_assert_cmpstr(tok, ==, "2-1-2-XyZ");
-	g_assert_cmpstr(dd, ==, "QWERTYUIOPASDFGHJKLZXCVBNM12");
-	g_free(tok);
-	g_free(dd);
+	g_assert_false(sc_parse_token_reply("{\"error\":\"invalid_grant\","
+		"\"error_description\":\"expired\"}", &t, &err));
+	g_assert_cmpstr(err->message, ==, "expired");
+	g_clear_error(&err);
+}
 
-	/* just the token */
-	g_assert_true(sc_parse_session("  2-9-9-abc \n", &tok, &dd));
-	g_assert_cmpstr(tok, ==, "2-9-9-abc");
-	g_assert_null(dd);
-	g_free(tok);
+/* RFC 7636 appendix B */
+static void test_pkce(void)
+{
+	char *c = sc_pkce_challenge(
+			"dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk");
 
-	g_assert_false(sc_parse_session("nothing here", &tok, &dd));
-	g_assert_null(tok);
+	g_assert_cmpstr(c, ==, "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM");
+	g_free(c);
 }
 
 int main(int argc, char **argv)
@@ -644,6 +639,7 @@ int main(int argc, char **argv)
 	g_test_add_func("/deck/sync", test_sync);
 	g_test_add_func("/decoder/wav", test_decoder);
 	g_test_add_func("/soundcloud/parse", test_sc_parse);
-	g_test_add_func("/soundcloud/session", test_sc_session);
+	g_test_add_func("/soundcloud/tokens", test_sc_tokens);
+	g_test_add_func("/soundcloud/pkce", test_pkce);
 	return g_test_run();
 }

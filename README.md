@@ -54,7 +54,7 @@ Preferences.
 ```sh
 sudo dnf install gcc meson ninja-build gtk4-devel json-glib-devel \
     libcurl-devel rubberband-devel pulseaudio-libs-devel alsa-lib-devel \
-    ffmpeg-free-devel webkitgtk6.0-devel
+    ffmpeg-free-devel
 meson setup build && meson compile -C build && sudo meson install -C build
 ```
 
@@ -65,8 +65,7 @@ Or `rpmbuild -bb packaging/fedora/pengu-deck.spec`.
 ```sh
 sudo apt install meson ninja-build libgtk-4-dev libjson-glib-dev \
     libcurl4-openssl-dev libavformat-dev libavcodec-dev libavutil-dev \
-    libswresample-dev librubberband-dev libpulse-dev libasound2-dev \
-    libwebkitgtk-6.0-dev
+    libswresample-dev librubberband-dev libpulse-dev libasound2-dev
 meson setup build && meson compile -C build && sudo meson install -C build
 ```
 
@@ -83,9 +82,8 @@ flatpak run io.github.deimen24.PenguDeck
 ### From source
 
 C11, Meson ≥ 0.62, GTK 4 ≥ 4.10, GLib ≥ 2.74, json-glib, libcurl,
-FFmpeg ≥ 6.0, optionally Rubber Band ≥ 3 (keylock), alsa-lib (MIDI)
-and WebKitGTK 6.0 (SoundCloud login). Audio backends are loaded at
-runtime.
+FFmpeg ≥ 6.0, optionally Rubber Band ≥ 3 (keylock) and alsa-lib
+(MIDI). Audio backends are loaded at runtime.
 
 ```sh
 meson setup build && meson compile -C build && meson test -C build
@@ -124,21 +122,25 @@ Pro DJ Link over Ethernet is proprietary and not supported.
 
 ## SoundCloud
 
-Pengu Deck uses the same `api-v2` endpoints as the web player; the
-client ID is detected at start. Press **Log in to SoundCloud**: your
-browser opens soundcloud.com, you sign in there, then copy the session
-into the app. In the browser press F12, open the Network tab, click any
-request to api-v2.soundcloud.com, right click → Copy → Copy as cURL,
-and paste it into the login window; the app picks the token and the
-bot protection cookie out of it. The cookies `oauth_token` and
-`datadome` from the Storage tab, or the bare token, work as well.
-An embedded browser is offered too, but SoundCloud's bot protection
-refuses it on many networks.
+Pengu Deck uses the official SoundCloud API, so it needs an app of your
+own registered at
+[developers.soundcloud.com](https://developers.soundcloud.com/):
 
-Then search, or paste a track, set or artist link. Streams start
-within a second and are cached to `~/.cache/pengu-deck/soundcloud/`
-while playing; cached tracks show ⬇ and the cache can be cleared in
-Preferences. Preview-only tracks play as 30 s snippets and are marked
+1. Register an app and set its redirect URI to
+   `http://127.0.0.1:38472/callback`.
+2. Enter the app's client ID and client secret in **Preferences →
+   SoundCloud**. Search and public links work from here on.
+3. Press **Log in to SoundCloud** in the SoundCloud tab: your browser
+   opens SoundCloud's authorization page, you sign in and allow the
+   app, and SoundCloud sends the browser back to Pengu Deck. This is
+   OAuth 2.1 with PKCE; your password never passes through the app.
+
+Then search, or paste a track, set or artist link. Your likes load
+with the **♥ Likes** button. Tokens are refreshed automatically and
+kept in `~/.config/pengu-deck/settings.ini`. Streams are cached to
+`~/.cache/pengu-deck/soundcloud/` while playing; cached tracks show ⬇
+and the cache can be cleared in Preferences. Tracks limited to previews
+by their rights holders play as 30 s snippets and are marked
 "(preview)".
 
 ## Recording, broadcasting, microphone

@@ -6,7 +6,7 @@ Build-Depends: debhelper-compat (= 13), meson (>= 0.62), ninja-build,
  pkgconf, libgtk-4-dev (>= 4.10), libglib2.0-dev, libjson-glib-dev,
  libcurl4-openssl-dev | libcurl4-gnutls-dev, libavformat-dev,
  libavcodec-dev, libavutil-dev, libswresample-dev, librubberband-dev,
- libpulse-dev, libasound2-dev, libwebkitgtk-6.0-dev, desktop-file-utils
+ libpulse-dev, libasound2-dev, desktop-file-utils
 Standards-Version: 4.6.2
 Homepage: https://github.com/deimen24/Pengu_Deck
 Rules-Requires-Root: no

@@ -1,10 +1,9 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 /*
- * sclogin.h - log in to SoundCloud inside the app
+ * sclogin.h - the SoundCloud login window
  *
- * Opens soundcloud.com in an embedded WebKit view; once the site has set
- * its oauth_token cookie the token is copied into the settings, the
- * public client id is detected and the window closes.
+ * Signs the user in through their browser with OAuth 2.1 and PKCE; see
+ * scauth.h for the flow.
  */
 #ifndef PD_UI_SCLOGIN_H
 #define PD_UI_SCLOGIN_H

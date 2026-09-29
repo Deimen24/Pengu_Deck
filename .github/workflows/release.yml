@@ -26,7 +26,7 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed git meson ninja pkgconf gtk4 \
             glib2 json-glib curl ffmpeg rubberband libpulse alsa-lib \
-            webkitgtk-6.0 desktop-file-utils
+            desktop-file-utils
       - uses: actions/checkout@v5
       - name: Package
         run: |
@@ -51,7 +51,7 @@ jobs:
             libjson-glib-dev libcurl4-openssl-dev libavformat-dev \
             libavcodec-dev libavutil-dev libswresample-dev \
             librubberband-dev libpulse-dev libasound2-dev \
-            libwebkitgtk-6.0-dev desktop-file-utils debhelper devscripts
+            desktop-file-utils debhelper devscripts
       - name: Package
         run: |
           dpkg-buildpackage -us -uc -b
@@ -70,7 +70,7 @@ jobs:
         run: |
           dnf install -y gcc meson ninja-build pkgconf gtk4-devel \
             glib2-devel json-glib-devel libcurl-devel rubberband-devel \
-            pulseaudio-libs-devel alsa-lib-devel webkitgtk6.0-devel \
+            pulseaudio-libs-devel alsa-lib-devel \
             desktop-file-utils rpm-build git ffmpeg-free-devel
       - uses: actions/checkout@v5
       - name: Package

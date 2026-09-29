@@ -15,6 +15,8 @@
 static void queue_changed(GListModel *m, guint pos, guint removed,
 			  guint added, gpointer data);
 
+static void sc_tokens_changed(gpointer data);
+
 void app_init(struct app *a, GtkApplication *gtk)
 {
 	int i;
@@ -28,7 +30,18 @@ void app_init(struct app *a, GtkApplication *gtk)
 	cuestore_open();
 	playlists_open();
 	net_init();
-	net_set_soundcloud_cookies(a->cfg.sc_cookies);
+	app_sc_configure(a);
+	{
+		struct sc_tokens t = {
+			.access = a->cfg.sc_access,
+			.refresh = a->cfg.sc_refresh,
+			.expires_at = a->cfg.sc_expires,
+			.user = a->cfg.sc_user,
+		};
+
+		sc_session_set_tokens(&t);
+	}
+	sc_session_set_changed(sc_tokens_changed, a);
 	a->library = g_list_store_new(PD_TYPE_MEDIA_ITEM);
 	a->sc_results = g_list_store_new(PD_TYPE_MEDIA_ITEM);
 	a->queue = g_list_store_new(PD_TYPE_MEDIA_ITEM);
@@ -288,10 +301,7 @@ static gboolean sc_load_done(gpointer data)
 static gpointer sc_load_thread(gpointer data)
 {
 	struct sc_load *l = data;
-	struct sc_auth *auth = app_sc_auth(l->app);
-
-	l->url = sc_stream_url(auth, l->item, &l->err);
-	sc_auth_free(auth);
+	l->url = sc_stream_url(l->item, &l->err);
 	g_idle_add(sc_load_done, l);
 	return NULL;
 }
@@ -431,22 +441,25 @@ char app_deck_letter(int idx)
 	return (char)('A' + CLAMP(idx, 0, ENGINE_DECKS - 1));
 }
 
-struct sc_auth *app_sc_auth(struct app *a)
+/* The client refreshed or dropped its tokens: keep the config in step. */
+static void sc_tokens_changed(gpointer data)
 {
-	struct sc_auth *auth = g_new0(struct sc_auth, 1);
+	struct app *a = data;
+	struct sc_tokens t;
 
-	auth->client_id = g_strdup(a->cfg.sc_client_id);
-	auth->token = g_strdup(a->cfg.sc_token);
-	return auth;
+	sc_session_get_tokens(&t);
+	g_free(a->cfg.sc_access);
+	g_free(a->cfg.sc_refresh);
+	a->cfg.sc_access = t.access;
+	a->cfg.sc_refresh = t.refresh;
+	a->cfg.sc_expires = t.expires_at;
+	a->cfg.sc_user = t.user;
+	config_save(&a->cfg);
 }
 
-void sc_auth_free(struct sc_auth *auth)
+void app_sc_configure(struct app *a)
 {
-	if (!auth)
-		return;
-	g_free(auth->client_id);
-	g_free(auth->token);
-	g_free(auth);
+	sc_session_set_app(a->cfg.sc_client_id, a->cfg.sc_client_secret);
 }
 
 void app_toast(struct app *a, const char *fmt, ...)

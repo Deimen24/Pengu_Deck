@@ -39,7 +39,6 @@ modules:
     buildsystem: meson
     config-opts:
       - -Dkeylock=enabled
-      - -Dsclogin=enabled
     sources:
       - type: dir
         path: ../..

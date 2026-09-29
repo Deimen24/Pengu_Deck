@@ -2,48 +2,16 @@
 /*
  * net.c - minimal libcurl wrapper
  */
-#include <string.h>
-
 #include <curl/curl.h>
 
 #include "net.h"
 #include "pd-build.h"
 
 #define MAX_BODY	(16 * 1024 * 1024)
-/*
- * SoundCloud's bot detection flags clients that do not look like the
- * web player, per IP address, which then also blocks the embedded
- * login.  Send what a browser sends.
- */
-#define USER_AGENT \
-	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " \
-	"(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
+#define USER_AGENT	"PenguDeck/" PD_VERSION " (Linux; +https://github.com/" \
+			"deimen24/Pengu_Deck)"
 
 G_DEFINE_QUARK(pd-net-error-quark, net_error)
-
-static char *sc_cookies;
-G_LOCK_DEFINE_STATIC(sc_cookies);
-
-void net_set_soundcloud_cookies(const char *cookies)
-{
-	G_LOCK(sc_cookies);
-	g_free(sc_cookies);
-	sc_cookies = cookies && *cookies ? g_strdup(cookies) : NULL;
-	G_UNLOCK(sc_cookies);
-}
-
-static char *cookie_header_for(const char *url)
-{
-	char *hdr = NULL;
-
-	if (!strstr(url, "soundcloud.com") && !strstr(url, "sndcdn.com"))
-		return NULL;
-	G_LOCK(sc_cookies);
-	if (sc_cookies)
-		hdr = g_strdup_printf("Cookie: %s", sc_cookies);
-	G_UNLOCK(sc_cookies);
-	return hdr;
-}
 
 void net_init(void)
 {
@@ -66,12 +34,17 @@ static size_t write_cb(char *data, size_t size, size_t nmemb, void *user)
 	return n;
 }
 
-char *net_get(const char *url, const char *auth, long *status,
-	      GError **err)
+/*
+ * Run one request.  @form NULL means GET, else a form encoded POST.
+ * The body is always returned to the caller through @out; a NULL result
+ * with @err set marks a failed request.
+ */
+static char *request(const char *url, const char *form, const char *auth,
+		     long *status, char **reply, GError **err)
 {
 	struct curl_slist *hdr = NULL;
 	GString *body = g_string_new(NULL);
-	char *line = NULL, *cookie = NULL;
+	char *line = NULL;
 	long code = 0;
 	CURLcode rc;
 	CURL *c;
@@ -86,18 +59,14 @@ char *net_get(const char *url, const char *auth, long *status,
 	}
 
 	hdr = curl_slist_append(hdr, "Accept: application/json, */*");
-	hdr = curl_slist_append(hdr, "Accept-Language: en-US,en;q=0.9");
-	hdr = curl_slist_append(hdr, "Origin: https://soundcloud.com");
-	hdr = curl_slist_append(hdr, "Referer: https://soundcloud.com/");
-	hdr = curl_slist_append(hdr, "Sec-Fetch-Site: same-site");
-	hdr = curl_slist_append(hdr, "Sec-Fetch-Mode: cors");
-	hdr = curl_slist_append(hdr, "Sec-Fetch-Dest: empty");
-	cookie = cookie_header_for(url);
-	if (cookie)
-		hdr = curl_slist_append(hdr, cookie);
 	if (auth) {
 		line = g_strdup_printf("Authorization: %s", auth);
 		hdr = curl_slist_append(hdr, line);
+	}
+	if (form) {
+		hdr = curl_slist_append(hdr, "Content-Type: "
+					"application/x-www-form-urlencoded");
+		curl_easy_setopt(c, CURLOPT_POSTFIELDS, form);
 	}
 	curl_easy_setopt(c, CURLOPT_URL, url);
 	curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
@@ -115,7 +84,6 @@ char *net_get(const char *url, const char *auth, long *status,
 	curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
 	curl_easy_cleanup(c);
 	curl_slist_free_all(hdr);
-	g_free(cookie);
 	g_free(line);
 
 	if (status)
@@ -126,11 +94,25 @@ char *net_get(const char *url, const char *auth, long *status,
 		g_string_free(body, TRUE);
 		return NULL;
 	}
-	if (code >= 400) {
-		g_set_error(err, NET_ERROR, NET_ERROR_HTTP,
-			    "Server answered with HTTP %ld", code);
-		g_string_free(body, TRUE);
+	if (code < 200 || code >= 300) {
+		g_set_error(err, NET_ERROR, NET_ERROR_HTTP, "HTTP %ld", code);
+		if (reply)
+			*reply = g_string_free(body, FALSE);
+		else
+			g_string_free(body, TRUE);
 		return NULL;
 	}
 	return g_string_free(body, FALSE);
+}
+
+char *net_get(const char *url, const char *auth, long *status,
+	      GError **err)
+{
+	return request(url, NULL, auth, status, NULL, err);
+}
+
+char *net_post_form(const char *url, const char *form, const char *auth,
+		    long *status, char **reply, GError **err)
+{
+	return request(url, form, auth, status, reply, err);
 }

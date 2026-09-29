@@ -2,7 +2,5 @@ option('keylock', type: 'feature', value: 'auto',
 	description: 'Tempo change without pitch change (needs Rubber Band)')
 option('midi', type: 'feature', value: 'auto',
 	description: 'MIDI controller support through the ALSA sequencer')
-option('sclogin', type: 'feature', value: 'auto',
-	description: 'Log in to SoundCloud inside the app (needs WebKitGTK 6)')
 option('tests', type: 'boolean', value: true,
 	description: 'Build the unit tests')

@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 /*
- * soundcloud.c - SoundCloud api-v2 client
+ * soundcloud.c - SoundCloud public API client
  */
-#include <stdbool.h>
 #include <string.h>
 
 #include <json-glib/json-glib.h>
@@ -10,12 +9,17 @@
 #include "net.h"
 #include "soundcloud.h"
 
-#define API		"https://api-v2.soundcloud.com"
+#define API		"https://api.soundcloud.com"
+#define TOKEN_URL	"https://secure.soundcloud.com/oauth/token"
 #define PAGE_LIMIT	50
 #define MAX_TRACKS	200
-#define IDS_PER_CALL	50
+#define ACCESS		"access=playable,preview"
+/* refresh this long before the token actually expires */
+#define EXPIRY_MARGIN	60
 
 G_DEFINE_QUARK(pd-soundcloud-error-quark, sc_error)
+
+/* ---- json helpers ------------------------------------------------ */
 
 static const char *str_member(JsonObject *o, const char *name)
 {
@@ -66,89 +70,6 @@ static JsonArray *arr_member(JsonObject *o, const char *name)
 	return JSON_NODE_HOLDS_ARRAY(n) ? json_node_get_array(n) : NULL;
 }
 
-/*
- * Rank a transcoding: plain progressive MP3 first, then HLS MP3, Opus and
- * AAC.  Encrypted (DRM) streams cannot be played and score zero.
- */
-static int transcoding_score(JsonObject *tc)
-{
-	JsonObject *fmt = obj_member(tc, "format");
-	const char *proto = str_member(fmt, "protocol");
-	const char *mime = str_member(fmt, "mime_type");
-	int score;
-
-	if (!proto || !mime || !str_member(tc, "url"))
-		return 0;
-	if (strstr(proto, "encrypted"))
-		return 0;
-	if (g_str_has_prefix(mime, "audio/mpeg"))
-		score = 30;
-	else if (g_str_has_prefix(mime, "audio/ogg"))
-		score = 20;
-	else if (g_str_has_prefix(mime, "audio/mp4") ||
-		 g_str_has_prefix(mime, "audio/aac"))
-		score = 10;
-	else
-		return 0;
-	if (strcmp(proto, "progressive") == 0)
-		score += 5;
-	else if (strcmp(proto, "hls") != 0)
-		return 0;
-	if (json_object_has_member(tc, "snipped") &&
-	    json_object_get_boolean_member(tc, "snipped"))
-		score -= 8;
-	return score;
-}
-
-static PdMediaItem *parse_track(JsonObject *o)
-{
-	JsonArray *tcs = arr_member(obj_member(o, "media"), "transcodings");
-	JsonObject *best = NULL;
-	int best_score = 0;
-	const char *genre, *policy;
-	PdMediaItem *m;
-	char *key;
-	guint i;
-
-	if (!o || !str_member(o, "title"))
-		return NULL;
-
-	for (i = 0; tcs && i < json_array_get_length(tcs); i++) {
-		JsonObject *tc = json_array_get_object_element(tcs, i);
-		int s = tc ? transcoding_score(tc) : 0;
-
-		if (s > best_score) {
-			best_score = s;
-			best = tc;
-		}
-	}
-
-	key = g_strdup_printf("soundcloud:%" G_GINT64_FORMAT,
-			      int_member(o, "id"));
-	m = pd_media_item_new(MEDIA_SOUNDCLOUD, key);
-	g_free(key);
-
-	m->title = g_strdup(str_member(o, "title"));
-	m->artist = g_strdup(str_member(obj_member(o, "user"), "username"));
-	genre = str_member(o, "genre");
-	m->genre = g_strdup(genre ? genre : "");
-	m->album = g_strdup("");
-	m->duration = int_member(o, "full_duration") / 1000.0;
-	if (m->duration <= 0.0)
-		m->duration = int_member(o, "duration") / 1000.0;
-	m->permalink = g_strdup(str_member(o, "permalink_url"));
-	m->track_auth = g_strdup(str_member(o, "track_authorization"));
-	policy = str_member(o, "policy");
-	m->preview = policy && strcmp(policy, "SNIP") == 0;
-	if (best) {
-		m->location = g_strdup(str_member(best, "url"));
-		if (json_object_has_member(best, "snipped") &&
-		    json_object_get_boolean_member(best, "snipped"))
-			m->preview = TRUE;
-	}
-	return m;
-}
-
 static JsonNode *parse_json(const char *text, GError **err)
 {
 	JsonParser *p = json_parser_new();
@@ -162,17 +83,401 @@ static JsonNode *parse_json(const char *text, GError **err)
 	return root;
 }
 
-/* Tracks either are the element or sit in its "track" member (likes). */
+/* ---- session ----------------------------------------------------- */
+
+static struct {
+	GMutex lock;
+	char *client_id;
+	char *client_secret;
+	struct sc_tokens t;
+	void (*changed)(gpointer data);
+	gpointer changed_data;
+} ses;
+
+static gboolean changed_idle(gpointer data)
+{
+	if (ses.changed)
+		ses.changed(ses.changed_data);
+	return G_SOURCE_REMOVE;
+}
+
+/* Call with the lock held. */
+static void notify_changed(void)
+{
+	g_idle_add(changed_idle, NULL);
+}
+
+static void tokens_copy(struct sc_tokens *dst, const struct sc_tokens *src)
+{
+	dst->access = g_strdup(src->access);
+	dst->refresh = g_strdup(src->refresh);
+	dst->expires_at = src->expires_at;
+	dst->user = src->user;
+}
+
+void sc_tokens_clear(struct sc_tokens *t)
+{
+	g_clear_pointer(&t->access, g_free);
+	g_clear_pointer(&t->refresh, g_free);
+	t->expires_at = 0;
+	t->user = FALSE;
+}
+
+void sc_session_set_app(const char *client_id, const char *client_secret)
+{
+	gboolean same;
+
+	g_mutex_lock(&ses.lock);
+	same = g_strcmp0(client_id, ses.client_id) == 0 &&
+	       g_strcmp0(client_secret, ses.client_secret) == 0;
+	g_free(ses.client_id);
+	g_free(ses.client_secret);
+	ses.client_id = client_id && *client_id ? g_strdup(client_id) : NULL;
+	ses.client_secret = client_secret && *client_secret ?
+			    g_strdup(client_secret) : NULL;
+	/* tokens belong to the app that issued them */
+	if (!same)
+		sc_tokens_clear(&ses.t);
+	g_mutex_unlock(&ses.lock);
+}
+
+gboolean sc_session_has_app(void)
+{
+	gboolean has;
+
+	g_mutex_lock(&ses.lock);
+	has = ses.client_id && ses.client_secret;
+	g_mutex_unlock(&ses.lock);
+	return has;
+}
+
+void sc_session_set_tokens(const struct sc_tokens *t)
+{
+	g_mutex_lock(&ses.lock);
+	sc_tokens_clear(&ses.t);
+	if (t)
+		tokens_copy(&ses.t, t);
+	g_mutex_unlock(&ses.lock);
+}
+
+void sc_session_get_tokens(struct sc_tokens *out)
+{
+	g_mutex_lock(&ses.lock);
+	tokens_copy(out, &ses.t);
+	g_mutex_unlock(&ses.lock);
+}
+
+gboolean sc_session_logged_in(void)
+{
+	gboolean in;
+
+	g_mutex_lock(&ses.lock);
+	in = ses.t.user && ses.t.access;
+	g_mutex_unlock(&ses.lock);
+	return in;
+}
+
+void sc_session_logout(void)
+{
+	g_mutex_lock(&ses.lock);
+	sc_tokens_clear(&ses.t);
+	notify_changed();
+	g_mutex_unlock(&ses.lock);
+}
+
+void sc_session_set_changed(void (*cb)(gpointer data), gpointer data)
+{
+	ses.changed = cb;
+	ses.changed_data = data;
+}
+
+gboolean sc_parse_token_reply(const char *json, struct sc_tokens *out,
+			      GError **err)
+{
+	JsonNode *root = parse_json(json, err);
+	JsonObject *o;
+	const char *access;
+
+	if (!root)
+		return FALSE;
+	o = JSON_NODE_HOLDS_OBJECT(root) ? json_node_get_object(root) : NULL;
+	access = str_member(o, "access_token");
+	if (!access || !*access) {
+		const char *why = str_member(o, "error_description");
+
+		g_set_error(err, SC_ERROR, SC_ERROR_AUTH, "%s", why ? why :
+			    str_member(o, "error") ? str_member(o, "error") :
+			    "SoundCloud sent no access token");
+		json_node_unref(root);
+		return FALSE;
+	}
+	memset(out, 0, sizeof(*out));
+	out->access = g_strdup(access);
+	out->refresh = g_strdup(str_member(o, "refresh_token"));
+	if (int_member(o, "expires_in") > 0)
+		out->expires_at = g_get_real_time() / G_USEC_PER_SEC +
+				  int_member(o, "expires_in");
+	json_node_unref(root);
+	return TRUE;
+}
+
+/*
+ * One token request against the OAuth endpoint.  @grant is the form
+ * body without the client credentials, which are appended here.  Call
+ * with the lock held; the result replaces the session tokens.
+ */
+static gboolean token_request(const char *grant, gboolean user, GError **err)
+{
+	char *id = g_uri_escape_string(ses.client_id, NULL, FALSE);
+	char *secret = g_uri_escape_string(ses.client_secret, NULL, FALSE);
+	char *form = g_strdup_printf("%s&client_id=%s&client_secret=%s",
+				     grant, id, secret);
+	char *reply = NULL, *body;
+	struct sc_tokens t = { 0 };
+	long status = 0;
+	gboolean ok = FALSE;
+
+	body = net_post_form(TOKEN_URL, form, NULL, &status, &reply, err);
+	if (!body) {
+		if (reply && sc_parse_token_reply(reply, &t, NULL)) {
+			/* not reachable: an error status with a token */
+			sc_tokens_clear(&t);
+		} else if (reply) {
+			JsonNode *r = parse_json(reply, NULL);
+			const char *why = r && JSON_NODE_HOLDS_OBJECT(r) ?
+				str_member(json_node_get_object(r),
+					   "error_description") : NULL;
+
+			if (why) {
+				g_clear_error(err);
+				g_set_error(err, SC_ERROR, SC_ERROR_AUTH,
+					    "SoundCloud: %s", why);
+			}
+			if (r)
+				json_node_unref(r);
+		}
+		goto out;
+	}
+	if (!sc_parse_token_reply(body, &t, err))
+		goto out;
+	t.user = user;
+	sc_tokens_clear(&ses.t);
+	ses.t = t;
+	memset(&t, 0, sizeof(t));
+	notify_changed();
+	ok = TRUE;
+out:
+	sc_tokens_clear(&t);
+	g_free(body);
+	g_free(reply);
+	g_free(form);
+	g_free(secret);
+	g_free(id);
+	return ok;
+}
+
+char *sc_session_client_id(void)
+{
+	char *id;
+
+	g_mutex_lock(&ses.lock);
+	id = g_strdup(ses.client_id);
+	g_mutex_unlock(&ses.lock);
+	return id;
+}
+
+char *sc_session_post_grant(const char *grant, char **reply, long *status,
+			    GError **err)
+{
+	char *id, *secret, *form, *body;
+
+	g_mutex_lock(&ses.lock);
+	id = g_uri_escape_string(ses.client_id ? ses.client_id : "", NULL,
+				 FALSE);
+	secret = g_uri_escape_string(ses.client_secret ? ses.client_secret :
+				     "", NULL, FALSE);
+	g_mutex_unlock(&ses.lock);
+	form = g_strdup_printf("%s&client_id=%s&client_secret=%s", grant, id,
+			       secret);
+	body = net_post_form(TOKEN_URL, form, NULL, status, reply, err);
+	g_free(form);
+	g_free(secret);
+	g_free(id);
+	return body;
+}
+
+/* Call with the lock held. */
+static gboolean token_valid(void)
+{
+	gint64 now = g_get_real_time() / G_USEC_PER_SEC;
+
+	return ses.t.access && (ses.t.expires_at == 0 ||
+				ses.t.expires_at > now + EXPIRY_MARGIN);
+}
+
+char *sc_session_token(GError **err)
+{
+	char *token = NULL;
+
+	g_mutex_lock(&ses.lock);
+	if (!ses.client_id || !ses.client_secret) {
+		g_set_error_literal(err, SC_ERROR, SC_ERROR_NO_APP,
+				    "No SoundCloud app configured. Enter the "
+				    "client ID and secret of your registered "
+				    "app in Preferences → SoundCloud.");
+		goto out;
+	}
+	if (token_valid())
+		goto done;
+	/* refresh tokens are single use: one refresh at a time, in here */
+	if (ses.t.refresh) {
+		char *r = g_uri_escape_string(ses.t.refresh, NULL, FALSE);
+		char *grant = g_strdup_printf("grant_type=refresh_token"
+					      "&refresh_token=%s", r);
+		gboolean user = ses.t.user;
+		GError *e = NULL;
+
+		if (token_request(grant, user, &e)) {
+			g_free(grant);
+			g_free(r);
+			goto done;
+		}
+		g_free(grant);
+		g_free(r);
+		if (user) {
+			/* the login has lapsed for good */
+			sc_tokens_clear(&ses.t);
+			notify_changed();
+			g_set_error(err, SC_ERROR, SC_ERROR_NO_TOKEN,
+				    "Your SoundCloud login has expired (%s). "
+				    "Please log in again.", e->message);
+			g_error_free(e);
+			goto out;
+		}
+		g_error_free(e);
+		sc_tokens_clear(&ses.t);
+	}
+	/* no user: the app's own credentials serve public content */
+	if (!token_request("grant_type=client_credentials", FALSE, err))
+		goto out;
+done:
+	token = g_strdup(ses.t.access);
+out:
+	g_mutex_unlock(&ses.lock);
+	return token;
+}
+
+/* ---- requests ---------------------------------------------------- */
+
+static void refuse(GError **err, long status)
+{
+	g_clear_error(err);
+	if (status == 401 || status == 403)
+		g_set_error(err, SC_ERROR, SC_ERROR_AUTH,
+			    "SoundCloud refused the request (HTTP %ld)",
+			    status);
+	else if (status == 404)
+		g_set_error_literal(err, SC_ERROR, SC_ERROR_NOT_FOUND,
+				    "Not found on SoundCloud");
+	else if (status == 429)
+		g_set_error_literal(err, SC_ERROR, SC_ERROR_AUTH,
+				    "SoundCloud rate limit reached, try "
+				    "again later");
+}
+
+/* GET @url with the session token; a 401 gets one refresh and retry. */
+static char *api_get(const char *url, GError **err)
+{
+	int attempt;
+
+	for (attempt = 0; attempt < 2; attempt++) {
+		char *token = sc_session_token(err);
+		char *hdr, *body;
+		long status = 0;
+
+		if (!token)
+			return NULL;
+		hdr = g_strdup_printf("OAuth %s", token);
+		body = net_get(url, hdr, &status, err);
+		g_free(hdr);
+		if (body) {
+			g_free(token);
+			return body;
+		}
+		if (status == 401 && attempt == 0) {
+			struct sc_tokens t;
+
+			/* expire it so the next call refreshes */
+			g_mutex_lock(&ses.lock);
+			ses.t.expires_at = 1;
+			tokens_copy(&t, &ses.t);
+			g_mutex_unlock(&ses.lock);
+			sc_tokens_clear(&t);
+			g_clear_error(err);
+			g_free(token);
+			continue;
+		}
+		g_free(token);
+		if (status)
+			refuse(err, status);
+		return NULL;
+	}
+	return NULL;
+}
+
+/* ---- tracks ------------------------------------------------------ */
+
+static gint64 id_from_urn(const char *urn)
+{
+	const char *p = urn ? strrchr(urn, ':') : NULL;
+
+	return p ? g_ascii_strtoll(p + 1, NULL, 10) : 0;
+}
+
+static PdMediaItem *parse_track(JsonObject *o)
+{
+	const char *access = str_member(o, "access");
+	const char *urn = str_member(o, "urn");
+	const char *genre;
+	gint64 id = int_member(o, "id");
+	PdMediaItem *m;
+	char *key;
+
+	if (!o || !str_member(o, "title"))
+		return NULL;
+	if (!id)
+		id = id_from_urn(urn);
+	if (!id)
+		return NULL;
+
+	key = g_strdup_printf("soundcloud:%" G_GINT64_FORMAT, id);
+	m = pd_media_item_new(MEDIA_SOUNDCLOUD, key);
+	g_free(key);
+
+	m->title = g_strdup(str_member(o, "title"));
+	m->artist = g_strdup(str_member(obj_member(o, "user"), "username"));
+	genre = str_member(o, "genre");
+	m->genre = g_strdup(genre ? genre : "");
+	m->album = g_strdup("");
+	m->duration = int_member(o, "duration") / 1000.0;
+	m->permalink = g_strdup(str_member(o, "permalink_url"));
+	/* the streams endpoint wants the urn */
+	m->location = urn ? g_strdup(urn) :
+		      g_strdup_printf("soundcloud:tracks:%" G_GINT64_FORMAT,
+				      id);
+	m->preview = g_strcmp0(access, "preview") == 0;
+	if (g_strcmp0(access, "blocked") == 0)
+		g_clear_pointer(&m->location, g_free);
+	return m;
+}
+
 static void add_track_node(GPtrArray *out, JsonNode *n)
 {
-	JsonObject *o, *inner;
 	PdMediaItem *m;
 
 	if (!JSON_NODE_HOLDS_OBJECT(n))
 		return;
-	o = json_node_get_object(n);
-	inner = obj_member(o, "track");
-	m = parse_track(inner ? inner : o);
+	m = parse_track(json_node_get_object(n));
 	if (m)
 		g_ptr_array_add(out, m);
 }
@@ -203,143 +508,74 @@ GPtrArray *sc_parse_tracks(const char *json, GError **err)
 	return out;
 }
 
-static char *auth_header(const struct sc_auth *a)
+/* Fetch a paginated track collection, following next_href. */
+static GPtrArray *fetch_tracks(const char *first_url, GError **err)
 {
-	if (!a->token || !*a->token)
-		return NULL;
-	if (g_str_has_prefix(a->token, "OAuth "))
-		return g_strdup(a->token);
-	return g_strdup_printf("OAuth %s", a->token);
-}
+	GPtrArray *out = g_ptr_array_new_with_free_func(g_object_unref);
+	char *url = g_strdup(first_url);
 
-static bool check_auth(const struct sc_auth *a, GError **err)
-{
-	if (a->client_id && *a->client_id)
-		return true;
-	g_set_error(err, SC_ERROR, SC_ERROR_NO_CLIENT_ID,
-		    "No SoundCloud client ID set. Open Preferences and press "
-		    "\"Detect\" or paste one.");
-	return false;
-}
+	while (url && out->len < MAX_TRACKS) {
+		char *body = api_get(url, err);
+		GPtrArray *page;
+		JsonNode *root;
+		const char *next = NULL;
+		guint i;
 
-/* GET @url with client_id (and OAuth header) added. */
-static char *api_get(const struct sc_auth *a, const char *url, GError **err)
-{
-	char *full, *hdr, *body;
-	long status = 0;
-
-	full = g_strdup_printf("%s%sclient_id=%s", url,
-			       strchr(url, '?') ? "&" : "?", a->client_id);
-	hdr = auth_header(a);
-	body = net_get(full, hdr, &status, err);
-	if (!body && (status == 401 || status == 403) && err && *err) {
-		g_clear_error(err);
-		g_set_error(err, SC_ERROR, SC_ERROR_NO_CLIENT_ID,
-			    "SoundCloud refused the request (HTTP %ld). The "
-			    "client ID may have expired, press \"Detect\" in "
-			    "Preferences.", status);
+		g_free(url);
+		url = NULL;
+		if (!body) {
+			if (out->len == 0) {
+				g_ptr_array_unref(out);
+				return NULL;
+			}
+			g_clear_error(err);
+			break;
+		}
+		page = sc_parse_tracks(body, NULL);
+		for (i = 0; page && i < page->len; i++)
+			g_ptr_array_add(out, g_object_ref(page->pdata[i]));
+		if (page)
+			g_ptr_array_unref(page);
+		root = parse_json(body, NULL);
+		if (root && JSON_NODE_HOLDS_OBJECT(root))
+			next = str_member(json_node_get_object(root),
+					  "next_href");
+		if (next && *next)
+			url = g_strdup(next);
+		if (root)
+			json_node_unref(root);
+		g_free(body);
 	}
-	g_free(hdr);
-	g_free(full);
-	return body;
+	g_free(url);
+	return out;
 }
 
-GPtrArray *sc_search(const struct sc_auth *a, const char *query,
-		     GError **err)
+GPtrArray *sc_search(const char *query, GError **err)
 {
-	char *q, *url, *body;
-	GPtrArray *res;
+	char *q = g_uri_escape_string(query, NULL, FALSE);
+	char *url = g_strdup_printf(API "/tracks?q=%s&" ACCESS "&limit=%d"
+				    "&linked_partitioning=true", q,
+				    PAGE_LIMIT);
+	char *body = api_get(url, err);
+	GPtrArray *res = body ? sc_parse_tracks(body, err) : NULL;
 
-	if (!check_auth(a, err))
-		return NULL;
-	q = g_uri_escape_string(query, NULL, FALSE);
-	url = g_strdup_printf(API "/search/tracks?q=%s&limit=%d", q,
-			      PAGE_LIMIT);
-	body = api_get(a, url, err);
-	res = body ? sc_parse_tracks(body, err) : NULL;
 	g_free(body);
 	g_free(url);
 	g_free(q);
 	return res;
 }
 
-/* Fill in playlist entries that only carry an id. */
-static void fetch_stubs(const struct sc_auth *a, GPtrArray *out,
-			GArray *ids)
-{
-	guint i, j;
-
-	for (i = 0; i < ids->len; i += IDS_PER_CALL) {
-		GString *url = g_string_new(API "/tracks?ids=");
-		GPtrArray *part;
-		char *body;
-
-		for (j = i; j < ids->len && j < i + IDS_PER_CALL; j++)
-			g_string_append_printf(url, "%s%" G_GINT64_FORMAT,
-					       j > i ? "%2C" : "",
-					       g_array_index(ids, gint64, j));
-		body = api_get(a, url->str, NULL);
-		part = body ? sc_parse_tracks(body, NULL) : NULL;
-		for (j = 0; part && j < part->len; j++)
-			g_ptr_array_add(out, g_object_ref(part->pdata[j]));
-		if (part)
-			g_ptr_array_unref(part);
-		g_free(body);
-		g_string_free(url, TRUE);
-	}
-}
-
-static GPtrArray *parse_playlist(const struct sc_auth *a, JsonObject *o)
-{
-	GPtrArray *out = g_ptr_array_new_with_free_func(g_object_unref);
-	JsonArray *tracks = arr_member(o, "tracks");
-	GArray *stubs = g_array_new(FALSE, FALSE, sizeof(gint64));
-	guint i;
-
-	for (i = 0; tracks && i < json_array_get_length(tracks); i++) {
-		JsonObject *t = json_array_get_object_element(tracks, i);
-		gint64 id = int_member(t, "id");
-
-		if (str_member(t, "title"))
-			add_track_node(out, json_array_get_element(tracks, i));
-		else if (id)
-			g_array_append_val(stubs, id);
-	}
-	fetch_stubs(a, out, stubs);
-	g_array_unref(stubs);
-	return out;
-}
-
-static GPtrArray *user_tracks(const struct sc_auth *a, gint64 id,
-			      const char *what, GError **err)
-{
-	GPtrArray *res = NULL;
-	char *url, *body;
-
-	url = g_strdup_printf(API "/users/%" G_GINT64_FORMAT "/%s?limit=%d",
-			      id, what, MAX_TRACKS);
-	body = api_get(a, url, err);
-	if (body)
-		res = sc_parse_tracks(body, err);
-	g_free(body);
-	g_free(url);
-	return res;
-}
-
-GPtrArray *sc_resolve(const struct sc_auth *a, const char *link,
-		      GError **err)
+GPtrArray *sc_resolve(const char *link, GError **err)
 {
 	GPtrArray *res = NULL;
 	char *q, *url, *body;
 	JsonNode *root;
 	JsonObject *o;
-	const char *kind;
+	const char *kind, *urn;
 
-	if (!check_auth(a, err))
-		return NULL;
 	q = g_uri_escape_string(link, NULL, FALSE);
 	url = g_strdup_printf(API "/resolve?url=%s", q);
-	body = api_get(a, url, err);
+	body = api_get(url, err);
 	g_free(url);
 	g_free(q);
 	if (!body)
@@ -351,14 +587,28 @@ GPtrArray *sc_resolve(const struct sc_auth *a, const char *link,
 		return NULL;
 	o = JSON_NODE_HOLDS_OBJECT(root) ? json_node_get_object(root) : NULL;
 	kind = str_member(o, "kind");
+	urn = str_member(o, "urn");
 
 	if (kind && strcmp(kind, "track") == 0) {
 		res = g_ptr_array_new_with_free_func(g_object_unref);
 		add_track_node(res, root);
-	} else if (kind && strcmp(kind, "playlist") == 0) {
-		res = parse_playlist(a, o);
-	} else if (kind && strcmp(kind, "user") == 0) {
-		res = user_tracks(a, int_member(o, "id"), "tracks", err);
+	} else if (kind && strcmp(kind, "playlist") == 0 && urn) {
+		char *u = g_uri_escape_string(urn, NULL, FALSE);
+
+		url = g_strdup_printf(API "/playlists/%s/tracks?" ACCESS
+				      "&linked_partitioning=true", u);
+		res = fetch_tracks(url, err);
+		g_free(url);
+		g_free(u);
+	} else if (kind && strcmp(kind, "user") == 0 && urn) {
+		char *u = g_uri_escape_string(urn, NULL, FALSE);
+
+		url = g_strdup_printf(API "/users/%s/tracks?" ACCESS
+				      "&limit=%d&linked_partitioning=true",
+				      u, PAGE_LIMIT);
+		res = fetch_tracks(url, err);
+		g_free(url);
+		g_free(u);
 	} else {
 		g_set_error(err, SC_ERROR, SC_ERROR_NOT_FOUND,
 			    "That link is not a SoundCloud track, playlist "
@@ -368,62 +618,45 @@ GPtrArray *sc_resolve(const struct sc_auth *a, const char *link,
 	return res;
 }
 
-GPtrArray *sc_likes(const struct sc_auth *a, GError **err)
+GPtrArray *sc_likes(GError **err)
 {
-	JsonNode *root;
-	char *body;
-	gint64 id;
-
-	if (!check_auth(a, err))
-		return NULL;
-	if (!a->token || !*a->token) {
-		g_set_error(err, SC_ERROR, SC_ERROR_NO_TOKEN,
-			    "Your likes need an OAuth token, see "
-			    "Preferences.");
+	if (!sc_session_logged_in()) {
+		g_set_error_literal(err, SC_ERROR, SC_ERROR_NO_TOKEN,
+				    "Log in to SoundCloud to see your likes.");
 		return NULL;
 	}
-	body = api_get(a, API "/me", err);
-	if (!body)
-		return NULL;
-	root = parse_json(body, err);
-	g_free(body);
-	if (!root)
-		return NULL;
-	id = JSON_NODE_HOLDS_OBJECT(root) ?
-	     int_member(json_node_get_object(root), "id") : 0;
-	json_node_unref(root);
-	if (!id) {
-		g_set_error(err, SC_ERROR, SC_ERROR_PARSE,
-			    "Could not read your SoundCloud account");
-		return NULL;
-	}
-	return user_tracks(a, id, "track_likes", err);
+	return fetch_tracks(API "/me/likes/tracks?" ACCESS "&limit=200"
+			    "&linked_partitioning=true", err);
 }
 
-char *sc_stream_url(const struct sc_auth *a, PdMediaItem *m, GError **err)
-{
-	char *url, *body, *res = NULL;
-	JsonNode *root;
-	const char *u;
+/* Progressive MP3 first: FFmpeg seeks it freely; then the HLS variants. */
+static const char *const stream_keys[] = {
+	"http_mp3_128_url",
+	"hls_mp3_128_url",
+	"hls_aac_160_url",
+	"hls_opus_64_url",
+	"preview_mp3_128_url",
+};
 
-	if (!check_auth(a, err))
-		return NULL;
+char *sc_stream_url(PdMediaItem *m, GError **err)
+{
+	char *u, *url, *body, *res = NULL;
+	JsonNode *root;
+	JsonObject *o;
+	guint i;
+
 	if (!m->location) {
 		g_set_error(err, SC_ERROR, SC_ERROR_NOT_STREAMABLE,
-			    "\"%s\" has no playable stream (it may be DRM "
-			    "protected or not available in your country)",
-			    m->title);
+			    "\"%s\" cannot be streamed (blocked by the "
+			    "rights holder or not available in your "
+			    "country)", m->title);
 		return NULL;
 	}
-	if (m->track_auth)
-		url = g_strdup_printf("%s%strack_authorization=%s",
-				      m->location,
-				      strchr(m->location, '?') ? "&" : "?",
-				      m->track_auth);
-	else
-		url = g_strdup(m->location);
-	body = api_get(a, url, err);
+	u = g_uri_escape_string(m->location, NULL, FALSE);
+	url = g_strdup_printf(API "/tracks/%s/streams", u);
+	body = api_get(url, err);
 	g_free(url);
+	g_free(u);
 	if (!body)
 		return NULL;
 
@@ -431,100 +664,16 @@ char *sc_stream_url(const struct sc_auth *a, PdMediaItem *m, GError **err)
 	g_free(body);
 	if (!root)
 		return NULL;
-	u = JSON_NODE_HOLDS_OBJECT(root) ?
-	    str_member(json_node_get_object(root), "url") : NULL;
-	if (u)
-		res = g_strdup(u);
-	else
+	o = JSON_NODE_HOLDS_OBJECT(root) ? json_node_get_object(root) : NULL;
+	for (i = 0; i < G_N_ELEMENTS(stream_keys) && !res; i++) {
+		const char *s = str_member(o, stream_keys[i]);
+
+		if (s && *s)
+			res = g_strdup(s);
+	}
+	if (!res)
 		g_set_error(err, SC_ERROR, SC_ERROR_NOT_STREAMABLE,
 			    "SoundCloud did not return a stream");
 	json_node_unref(root);
 	return res;
-}
-
-static char *find_client_id(const char *js)
-{
-	GRegex *re = g_regex_new("client_id\\s*[:=]\\s*\"?([0-9a-zA-Z]{32})",
-				 0, 0, NULL);
-	GMatchInfo *mi = NULL;
-	char *id = NULL;
-
-	if (g_regex_match(re, js, 0, &mi))
-		id = g_match_info_fetch(mi, 1);
-	g_match_info_free(mi);
-	g_regex_unref(re);
-	return id;
-}
-
-char *sc_detect_client_id(GError **err)
-{
-	GRegex *re;
-	GMatchInfo *mi = NULL;
-	GPtrArray *scripts = g_ptr_array_new_with_free_func(g_free);
-	char *html, *id = NULL;
-	int i;
-
-	html = net_get("https://soundcloud.com/", NULL, NULL, err);
-	if (!html) {
-		g_ptr_array_unref(scripts);
-		return NULL;
-	}
-	re = g_regex_new("<script[^>]+src=\"(https://[^\"]+sndcdn\\.com/"
-			 "assets/[^\"]+\\.js)\"", 0, 0, NULL);
-	g_regex_match(re, html, 0, &mi);
-	while (g_match_info_matches(mi)) {
-		g_ptr_array_add(scripts, g_match_info_fetch(mi, 1));
-		g_match_info_next(mi, NULL);
-	}
-	g_match_info_free(mi);
-	g_regex_unref(re);
-	g_free(html);
-
-	/* The id lives in one of the last bundles, walk backwards. */
-	for (i = (int)scripts->len - 1; i >= 0 && !id; i--) {
-		char *js = net_get(scripts->pdata[i], NULL, NULL, NULL);
-
-		if (js)
-			id = find_client_id(js);
-		g_free(js);
-	}
-	g_ptr_array_unref(scripts);
-
-	if (!id && err && !*err)
-		g_set_error(err, SC_ERROR, SC_ERROR_NO_CLIENT_ID,
-			    "Could not find a client ID on soundcloud.com");
-	return id;
-}
-
-static char *first_match(const char *pattern, const char *text)
-{
-	GRegex *re = g_regex_new(pattern, G_REGEX_CASELESS, 0, NULL);
-	GMatchInfo *mi = NULL;
-	char *hit = NULL;
-
-	if (re && g_regex_match(re, text, 0, &mi))
-		hit = g_match_info_fetch(mi, 1);
-	g_match_info_free(mi);
-	if (re)
-		g_regex_unref(re);
-	return hit;
-}
-
-gboolean sc_parse_session(const char *text, char **token, char **datadome)
-{
-	*token = NULL;
-	*datadome = NULL;
-	if (!text)
-		return FALSE;
-	*token = first_match("oauth_token[=:\\s\"']+([0-9]-[0-9]+-[0-9]+-"
-			     "[A-Za-z0-9]+)", text);
-	if (!*token)
-		*token = first_match("Authorization:\\s*OAuth\\s+([0-9]-"
-				     "[0-9]+-[0-9]+-[A-Za-z0-9]+)", text);
-	if (!*token)
-		*token = first_match("(?:^|[^A-Za-z0-9-])([0-9]-[0-9]+-[0-9]+-"
-				     "[A-Za-z0-9]+)", text);
-	*datadome = first_match("datadome[=:\\s\"']+([A-Za-z0-9_~.-]{20,})",
-				text);
-	return *token != NULL;
 }

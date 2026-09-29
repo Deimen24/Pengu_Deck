@@ -95,8 +95,12 @@ void config_load(struct config *c)
 						 "Pengu Deck Mixes", NULL);
 
 	c->sc_client_id = get_str(kf, "soundcloud", "client_id");
-	c->sc_token = get_str(kf, "soundcloud", "oauth_token");
-	c->sc_cookies = get_str(kf, "soundcloud", "cookies");
+	c->sc_client_secret = get_str(kf, "soundcloud", "client_secret");
+	c->sc_access = get_str(kf, "soundcloud", "access_token");
+	c->sc_refresh = get_str(kf, "soundcloud", "refresh_token");
+	c->sc_expires = g_key_file_get_int64(kf, "soundcloud", "expires_at",
+					     NULL);
+	c->sc_user = get_int(kf, "soundcloud", "user", 0);
 
 	c->ndecks = get_int(kf, "decks", "count", 2);
 	c->pitch_range = get_int(kf, "decks", "pitch_range", 8);
@@ -164,10 +168,14 @@ void config_save(const struct config *c)
 
 	g_key_file_set_string(kf, "soundcloud", "client_id",
 			      c->sc_client_id ? c->sc_client_id : "");
-	g_key_file_set_string(kf, "soundcloud", "oauth_token",
-			      c->sc_token ? c->sc_token : "");
-	g_key_file_set_string(kf, "soundcloud", "cookies",
-			      c->sc_cookies ? c->sc_cookies : "");
+	g_key_file_set_string(kf, "soundcloud", "client_secret",
+			      c->sc_client_secret ? c->sc_client_secret : "");
+	g_key_file_set_string(kf, "soundcloud", "access_token",
+			      c->sc_access ? c->sc_access : "");
+	g_key_file_set_string(kf, "soundcloud", "refresh_token",
+			      c->sc_refresh ? c->sc_refresh : "");
+	g_key_file_set_int64(kf, "soundcloud", "expires_at", c->sc_expires);
+	g_key_file_set_integer(kf, "soundcloud", "user", c->sc_user);
 
 	g_key_file_set_integer(kf, "decks", "count", c->ndecks);
 	g_key_file_set_integer(kf, "decks", "pitch_range", c->pitch_range);
@@ -235,7 +243,8 @@ void config_clear(struct config *c)
 	g_strfreev(c->folders);
 	g_free(c->record_dir);
 	g_free(c->sc_client_id);
-	g_free(c->sc_token);
-	g_free(c->sc_cookies);
+	g_free(c->sc_client_secret);
+	g_free(c->sc_access);
+	g_free(c->sc_refresh);
 	memset(c, 0, sizeof(*c));
 }

@@ -34,14 +34,12 @@ swr_dep = dependency('libswresample', version: '>= 4.7')
 rubberband_dep = dependency('rubberband', version: '>= 3.0',
 	required: get_option('keylock'))
 alsa_dep = dependency('alsa', required: get_option('midi'))
-webkit_dep = dependency('webkitgtk-6.0', required: get_option('sclogin'))
 
 conf = configuration_data()
 conf.set_quoted('PD_VERSION', meson.project_version())
 conf.set_quoted('PD_APP_ID', 'io.github.deimen24.PenguDeck')
 conf.set('HAVE_RUBBERBAND', rubberband_dep.found())
 conf.set('HAVE_ALSA', alsa_dep.found())
-conf.set('HAVE_WEBKIT', webkit_dep.found())
 configure_file(output: 'pd-build.h', configuration: conf)
 
 miniaudio_inc = include_directories('third_party/miniaudio')
@@ -62,6 +60,7 @@ core_src = files(
 	'src/net.c',
 	'src/playlists.c',
 	'src/sampler.c',
+	'src/scauth.c',
 	'src/soundcloud.c',
 	'src/track.c',
 )
@@ -111,7 +110,7 @@ ui_src = files(
 )
 
 executable('pengu-deck', ui_src, resources,
-	dependencies: [core_dep, gtk_dep, alsa_dep, webkit_dep],
+	dependencies: [core_dep, gtk_dep, alsa_dep],
 	install: true)
 
 subdir('data')

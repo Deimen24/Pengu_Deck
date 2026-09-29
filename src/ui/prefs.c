@@ -5,7 +5,7 @@
 #include <string.h>
 
 #include "midi.h"
-#include "net.h"
+#include "scauth.h"
 #include "prefs.h"
 #include "window.h"
 #include "sccache.h"
@@ -29,9 +29,7 @@ struct prefs {
 	GtkWidget *folders;
 	GtkWidget *record_dir;
 	GtkWidget *client_id;
-	GtkWidget *token;
-	GtkWidget *cookies;
-	GtkWidget *detect;
+	GtkWidget *client_secret;
 	GtkWidget *cache_label;
 	GtkWidget *mic;
 	GtkWidget *mic_device;
@@ -295,52 +293,6 @@ static void on_record_dir(GtkButton *b, struct prefs *p)
 
 /* ---- soundcloud -------------------------------------------------- */
 
-struct detect {
-	struct prefs *p;
-	char *id;
-	GError *err;
-};
-
-static gboolean detect_done(gpointer data)
-{
-	struct detect *d = data;
-	struct prefs *p = d->p;
-
-	if (p->win) {
-		gtk_widget_set_sensitive(p->detect, TRUE);
-		if (d->id) {
-			gtk_editable_set_text(GTK_EDITABLE(p->client_id),
-					      d->id);
-			set_status(p, "Client ID found", FALSE);
-		} else {
-			set_status(p, d->err->message, TRUE);
-		}
-	}
-	g_free(d->id);
-	g_clear_error(&d->err);
-	g_free(d);
-	return G_SOURCE_REMOVE;
-}
-
-static gpointer detect_thread(gpointer data)
-{
-	struct detect *d = data;
-
-	d->id = sc_detect_client_id(&d->err);
-	g_idle_add(detect_done, d);
-	return NULL;
-}
-
-static void on_detect(GtkButton *b, struct prefs *p)
-{
-	struct detect *d = g_new0(struct detect, 1);
-
-	d->p = p;
-	gtk_widget_set_sensitive(p->detect, FALSE);
-	set_status(p, "Looking for a client ID on soundcloud.com…", FALSE);
-	g_thread_unref(g_thread_new("pd-sc-detect", detect_thread, d));
-}
-
 /* ---- apply ------------------------------------------------------- */
 
 static char *dropdown_text(GtkWidget *d)
@@ -424,11 +376,9 @@ static void on_apply(GtkButton *b, struct prefs *p)
 					GTK_EDITABLE(p->record_dir)));
 	c->sc_client_id = g_strdup(gtk_editable_get_text(
 					GTK_EDITABLE(p->client_id)));
-	c->sc_token = g_strdup(gtk_editable_get_text(
-					GTK_EDITABLE(p->token)));
-	c->sc_cookies = g_strdup(gtk_editable_get_text(
-					GTK_EDITABLE(p->cookies)));
-	net_set_soundcloud_cookies(c->sc_cookies);
+	c->sc_client_secret = g_strdup(gtk_editable_get_text(
+					GTK_EDITABLE(p->client_secret)));
+	app_sc_configure(a);
 	audio_changed = c->backend != old.backend ||
 			g_strcmp0(c->device, old.device) != 0 ||
 			c->rate != old.rate || c->period != old.period ||
@@ -438,8 +388,7 @@ static void on_apply(GtkButton *b, struct prefs *p)
 	g_free(old.device);
 	g_free(old.record_dir);
 	g_free(old.sc_client_id);
-	g_free(old.sc_token);
-	g_free(old.sc_cookies);
+	g_free(old.sc_client_secret);
 	g_free(old.mic_device);
 	config_save(c);
 
@@ -640,50 +589,51 @@ static void build_library(struct prefs *p, GtkWidget *nb)
 	row(g, 2, "Recordings", box);
 }
 
+static void on_copy_redirect(GtkButton *b, struct prefs *p)
+{
+	gdk_clipboard_set_text(gtk_widget_get_clipboard(GTK_WIDGET(b)),
+			       SC_REDIRECT_URI);
+	set_status(p, "Redirect URI copied", FALSE);
+}
+
 static void build_soundcloud(struct prefs *p, GtkWidget *nb)
 {
 	struct config *c = &p->app->cfg;
 	GtkWidget *g = page(nb, "SoundCloud");
-	GtkWidget *box, *l;
+	GtkWidget *box, *l, *b;
 
-	box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
 	p->client_id = gtk_entry_new();
 	gtk_editable_set_text(GTK_EDITABLE(p->client_id),
 			      c->sc_client_id ? c->sc_client_id : "");
-	gtk_widget_set_hexpand(p->client_id, TRUE);
-	gtk_box_append(GTK_BOX(box), p->client_id);
-	p->detect = gtk_button_new_with_label("Detect");
-	gtk_widget_set_tooltip_text(p->detect, "Read the public client ID "
-				    "from the SoundCloud web player");
-	g_signal_connect(p->detect, "clicked", G_CALLBACK(on_detect), p);
-	gtk_box_append(GTK_BOX(box), p->detect);
-	row(g, 0, "Client ID", box);
+	row(g, 0, "Client ID", p->client_id);
 
-	p->token = gtk_password_entry_new();
-	gtk_password_entry_set_show_peek_icon(GTK_PASSWORD_ENTRY(p->token),
-					      TRUE);
-	gtk_editable_set_text(GTK_EDITABLE(p->token),
-			      c->sc_token ? c->sc_token : "");
-	row(g, 1, "OAuth token", p->token);
+	p->client_secret = gtk_password_entry_new();
+	gtk_password_entry_set_show_peek_icon(
+			GTK_PASSWORD_ENTRY(p->client_secret), TRUE);
+	gtk_editable_set_text(GTK_EDITABLE(p->client_secret),
+			      c->sc_client_secret ? c->sc_client_secret : "");
+	row(g, 1, "Client secret", p->client_secret);
 
-	p->cookies = gtk_entry_new();
-	gtk_entry_set_placeholder_text(GTK_ENTRY(p->cookies),
-				       "datadome=…");
-	gtk_editable_set_text(GTK_EDITABLE(p->cookies),
-			      c->sc_cookies ? c->sc_cookies : "");
-	gtk_widget_set_tooltip_text(p->cookies, "Cookies sent with every "
-				    "SoundCloud request, as name=value pairs "
-				    "separated by semicolons");
-	row(g, 2, "Cookies", p->cookies);
+	box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	l = gtk_label_new(SC_REDIRECT_URI);
+	gtk_label_set_selectable(GTK_LABEL(l), TRUE);
+	gtk_label_set_xalign(GTK_LABEL(l), 0.0f);
+	gtk_widget_add_css_class(l, "mono");
+	gtk_widget_set_hexpand(l, TRUE);
+	gtk_box_append(GTK_BOX(box), l);
+	b = gtk_button_new_with_label("Copy");
+	g_signal_connect(b, "clicked", G_CALLBACK(on_copy_redirect), p);
+	gtk_box_append(GTK_BOX(box), b);
+	row(g, 2, "Redirect URI", box);
 
 	{
 		GtkWidget *cbox = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-		GtkWidget *b = gtk_button_new_with_label("Clear cache");
 		char *size = g_format_size(sccache_size());
 		char *txt = g_strdup_printf("%s of cached streams in "
 					    "~/.cache/pengu-deck/soundcloud",
 					    size);
 
+		b = gtk_button_new_with_label("Clear cache");
 		p->cache_label = gtk_label_new(txt);
 		gtk_widget_add_css_class(p->cache_label, "dim-label");
 		gtk_widget_set_hexpand(p->cache_label, TRUE);
@@ -697,21 +647,15 @@ static void build_soundcloud(struct prefs *p, GtkWidget *nb)
 	}
 
 	l = gtk_label_new(
-		"Search and public links only need the client ID. Press "
-		"Detect to fetch the one the soundcloud.com player uses; it "
-		"changes every few weeks, so press it again if searches "
-		"start failing.\n\n"
-		"Your Likes need an OAuth token. Log in at soundcloud.com, "
-		"open the browser developer tools, and copy the value of "
-		"the \"oauth_token\" cookie (or the Authorization header of "
-		"any api-v2 request) here. The token is stored in "
-		"~/.config/pengu-deck/settings.ini with mode 0600.\n\n"
-		"If SoundCloud shows \"Verification Required\" in the app, its "
-		"bot protection has flagged your address. Pass the check "
-		"once in your browser, then copy the browser's "
-		"\"datadome\" cookie for soundcloud.com into the Cookies "
-		"field as datadome=VALUE: the app then sends the same "
-		"proof with its requests.\n\n"
+		"Pengu Deck uses the official SoundCloud API, which needs a "
+		"registered app: create one at "
+		"developers.soundcloud.com, enter the redirect URI above in "
+		"its settings, and paste its client ID and secret here. "
+		"Search and public links work with that alone; press "
+		"\"Log in to SoundCloud\" in the SoundCloud tab to sign in "
+		"with your browser and reach your likes. Tokens are kept "
+		"in ~/.config/pengu-deck/settings.ini with mode 0600 and "
+		"refreshed automatically.\n\n"
 		"Tracks you load or queue are downloaded into the cache in "
 		"the background and play from disk from then on.");
 	gtk_label_set_wrap(GTK_LABEL(l), TRUE);

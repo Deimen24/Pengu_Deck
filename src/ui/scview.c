@@ -9,6 +9,7 @@
 
 #include "sclogin.h"
 #include "scview.h"
+#include "soundcloud.h"
 
 struct _PdScView {
 	GtkBox parent;
@@ -36,7 +37,6 @@ struct query {
 	PdScView *view;
 	enum query_kind kind;
 	char *text;
-	struct sc_auth *auth;
 	GPtrArray *result;
 	GError *err;
 };
@@ -44,7 +44,6 @@ struct query {
 static void query_free(struct query *q)
 {
 	g_free(q->text);
-	sc_auth_free(q->auth);
 	if (q->result)
 		g_ptr_array_unref(q->result);
 	g_clear_error(&q->err);
@@ -80,13 +79,13 @@ static gpointer query_thread(gpointer data)
 
 	switch (q->kind) {
 	case QUERY_SEARCH:
-		q->result = sc_search(q->auth, q->text, &q->err);
+		q->result = sc_search(q->text, &q->err);
 		break;
 	case QUERY_RESOLVE:
-		q->result = sc_resolve(q->auth, q->text, &q->err);
+		q->result = sc_resolve(q->text, &q->err);
 		break;
 	case QUERY_LIKES:
-		q->result = sc_likes(q->auth, &q->err);
+		q->result = sc_likes(&q->err);
 		break;
 	}
 	g_idle_add(query_done, q);
@@ -100,7 +99,6 @@ static void run_query(PdScView *v, enum query_kind kind, const char *text)
 	q->view = g_object_ref(v);
 	q->kind = kind;
 	q->text = g_strdup(text);
-	q->auth = app_sc_auth(v->app);
 	v->pending++;
 	gtk_widget_set_visible(v->spinner, TRUE);
 	g_thread_unref(g_thread_new("pd-sc-query", query_thread, q));
@@ -138,7 +136,7 @@ static void login_done(gpointer data)
 
 static void on_login(GtkButton *b, PdScView *v)
 {
-	if (v->app->cfg.sc_token && *v->app->cfg.sc_token) {
+	if (sc_session_logged_in()) {
 		sclogin_logout(v->app);
 		update_login(v);
 		return;
@@ -148,7 +146,7 @@ static void on_login(GtkButton *b, PdScView *v)
 
 static void update_login(PdScView *v)
 {
-	gboolean in = v->app->cfg.sc_token && *v->app->cfg.sc_token;
+	gboolean in = sc_session_logged_in();
 
 	gtk_button_set_label(GTK_BUTTON(v->login), in ? "Log out" :
 			     "Log in to SoundCloud");
@@ -157,37 +155,6 @@ static void update_login(PdScView *v)
 		gtk_widget_add_css_class(v->login, "logged-in");
 	else
 		gtk_widget_remove_css_class(v->login, "logged-in");
-}
-
-/* Without a client id nothing works, so fetch one quietly at start. */
-struct auto_detect {
-	PdScView *v;
-	char *id;
-};
-
-static gboolean auto_detect_done(gpointer data)
-{
-	struct auto_detect *d = data;
-
-	if (d->id && !(d->v->app->cfg.sc_client_id &&
-		       *d->v->app->cfg.sc_client_id)) {
-		d->v->app->cfg.sc_client_id = d->id;
-		d->id = NULL;
-		config_save(&d->v->app->cfg);
-	}
-	g_free(d->id);
-	g_object_unref(d->v);
-	g_free(d);
-	return G_SOURCE_REMOVE;
-}
-
-static gpointer auto_detect_thread(gpointer data)
-{
-	struct auto_detect *d = data;
-
-	d->id = sc_detect_client_id(NULL);
-	g_idle_add(auto_detect_done, d);
-	return NULL;
 }
 
 static void pd_sc_view_class_init(PdScViewClass *klass)
@@ -234,8 +201,7 @@ GtkWidget *pd_sc_view_new(struct app *app)
 	g_signal_connect(v->login, "clicked", G_CALLBACK(on_login), v);
 	gtk_box_append(GTK_BOX(bar), v->login);
 	v->likes = gtk_button_new_with_label("♥ Likes");
-	gtk_widget_set_tooltip_text(v->likes, "Load your liked tracks "
-				    "(needs an OAuth token in Preferences)");
+	gtk_widget_set_tooltip_text(v->likes, "Load your liked tracks");
 	gtk_widget_set_focusable(v->likes, FALSE);
 	g_signal_connect(v->likes, "clicked", G_CALLBACK(on_likes), v);
 	gtk_box_append(GTK_BOX(bar), v->likes);
@@ -253,13 +219,6 @@ GtkWidget *pd_sc_view_new(struct app *app)
 	gtk_box_append(GTK_BOX(v), filter);
 	gtk_box_append(GTK_BOX(v), media);
 	update_login(v);
-	if (!(app->cfg.sc_client_id && *app->cfg.sc_client_id)) {
-		struct auto_detect *d = g_new0(struct auto_detect, 1);
-
-		d->v = g_object_ref(v);
-		g_thread_unref(g_thread_new("pd-sc-detect", auto_detect_thread,
-					    d));
-	}
 	return GTK_WIDGET(v);
 }
 

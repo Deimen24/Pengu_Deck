@@ -170,14 +170,13 @@ static gboolean fetch_done(gpointer data)
 static void fetch_thread(gpointer data, gpointer user)
 {
 	struct entry *e = data;
-	struct sc_auth *auth = app_sc_auth(app);
 	struct done_msg *d = g_new0(struct done_msg, 1);
 	char *part = g_strdup_printf("%s.part", e->path);
 	char *url;
 	int ret = -1;
 
 	d->e = e;
-	url = sc_stream_url(auth, e->item, NULL);
+	url = sc_stream_url(e->item, NULL);
 	if (url)
 		ret = remux(url, part, e);
 	if (ret == 0 && g_rename(part, e->path) == 0) {
@@ -188,7 +187,6 @@ static void fetch_thread(gpointer data, gpointer user)
 	}
 	g_free(url);
 	g_free(part);
-	sc_auth_free(auth);
 	if (!atomic_load(&shutting_down))
 		g_idle_add(fetch_done, d);
 	else

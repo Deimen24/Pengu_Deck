@@ -25,9 +25,12 @@ struct config {
 	char *record_dir;
 
 	/* soundcloud */
-	char *sc_client_id;
-	char *sc_token;
-	char *sc_cookies;	/* bot protection cookies from a browser */
+	char *sc_client_id;	/* the registered SoundCloud app */
+	char *sc_client_secret;
+	char *sc_access;	/* current tokens, refreshed by the client */
+	char *sc_refresh;
+	gint64 sc_expires;	/* unix seconds */
+	gboolean sc_user;	/* the tokens belong to a signed in user */
 
 	/* decks */
 	int ndecks;		/* 2 to 4 shown */

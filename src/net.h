@@ -15,17 +15,20 @@ enum net_error_code {
 void net_init(void);
 
 /*
- * Cookies sent with every request to soundcloud.com and sndcdn.com,
- * as one "name=value; name=value" string, or NULL for none.
- */
-void net_set_soundcloud_cookies(const char *cookies);
-
-/*
  * Blocking HTTP GET.  @auth, when not NULL, is sent as the Authorization
  * header.  Returns the body (NUL terminated) or NULL with @err set.  On
  * HTTP errors the status is stored in @status when not NULL.
  */
 char *net_get(const char *url, const char *auth, long *status,
 	      GError **err);
+
+/*
+ * Blocking HTTP POST of an application/x-www-form-urlencoded @form.
+ * Same conventions as net_get(); the body of an error reply is returned
+ * through @reply when not NULL, since OAuth servers explain themselves
+ * there.
+ */
+char *net_post_form(const char *url, const char *form, const char *auth,
+		    long *status, char **reply, GError **err);
 
 #endif /* PD_NET_H */

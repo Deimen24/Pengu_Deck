@@ -77,8 +77,7 @@ char app_deck_letter(int idx);
 /* Show a transient message at the bottom of the window. */
 void app_toast(struct app *a, const char *fmt, ...) G_GNUC_PRINTF(2, 3);
 
-/* Copy of the SoundCloud credentials, free with sc_auth_free(). */
-struct sc_auth *app_sc_auth(struct app *a);
-void sc_auth_free(struct sc_auth *auth);
+/* Push the app credentials from the config into the SoundCloud client. */
+void app_sc_configure(struct app *a);
 
 #endif /* PD_APP_H */
