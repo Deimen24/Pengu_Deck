@@ -313,6 +313,9 @@ static void bind_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 	gboolean played = app_item_played(v->app, m);
 	char *tmp = NULL;
 
+	/* every history entry was played, marking them all says nothing */
+	if (v->store == history_items())
+		played = FALSE;
 	mark_played(w, played);
 
 	switch (col) {
@@ -770,10 +773,13 @@ void pd_media_view_set_store(PdMediaView *v, GListStore *store,
 	g_signal_handlers_disconnect_by_data(v->selection, v);
 	v->store = store;
 	v->playlist = playlist;
+	/*
+	 * The sort and selection models take ownership of the model they
+	 * wrap, so only the selection is ours to drop; it releases the
+	 * chain.  The filter is kept alive across the swap.
+	 */
 	g_object_ref(filter);
 	g_clear_object(&v->selection);
-	g_clear_object(&v->sorted);
-	g_clear_object(&v->filtered);
 	v->filtered = gtk_filter_list_model_new(
 			G_LIST_MODEL(g_object_ref(store)), filter);
 	gtk_filter_list_model_set_incremental(v->filtered, TRUE);

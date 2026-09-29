@@ -18,6 +18,8 @@
 @define-color loop #4ade80;
 @define-color hot #f472b6;
 @define-color rec #ef4444;
+@define-color list-bg #0e1118;
+@define-color list-alt #111520;
 
 * {
 	outline: none;
@@ -446,8 +448,9 @@ notebook > header tab:checked {
 }
 
 columnview.data-table,
+columnview.data-table > listview,
 listview.queue-list {
-	background: #0a0c10;
+	background: @list-bg;
 	color: @fg;
 }
 
@@ -456,10 +459,11 @@ columnview.data-table > header > button {
 	border: none;
 	border-bottom: 1px solid @line;
 	border-radius: 0;
-	padding: 4px 8px;
+	padding: 7px 8px;
 	font-weight: 700;
-	font-size: 11px;
-	letter-spacing: 1px;
+	font-size: 10px;
+	letter-spacing: 1.5px;
+	text-transform: uppercase;
 	color: @dim;
 }
 
@@ -468,14 +472,41 @@ listview.queue-list > row {
 	padding: 1px 0;
 }
 
-columnview.data-table > listview > row:selected,
-listview.queue-list > row:selected {
-	background: alpha(@deck-a, 0.3);
+columnview.data-table > listview > row:nth-child(even),
+listview.queue-list > row:nth-child(even) {
+	background: @list-alt;
 }
 
 columnview.data-table > listview > row:hover,
 listview.queue-list > row:hover {
-	background: #1a1e27;
+	background: #161a24;
+}
+
+/* selected and played rows fade from a tint on the left into the list */
+columnview.data-table > listview > row:selected,
+listview.queue-list > row:selected {
+	background: linear-gradient(90deg, alpha(@deck-a, 0.18),
+				    alpha(@deck-a, 0.03));
+}
+
+columnview.data-table > listview > row.played,
+listview.queue-list > row.played {
+	background: linear-gradient(90deg, alpha(@dim, 0.10),
+				    alpha(@dim, 0.0));
+}
+
+row.played .row-title {
+	color: @dim;
+	font-weight: 500;
+}
+
+row.played .row-sub,
+row.played .row-len {
+	color: #5b6473;
+}
+
+row.played .pill {
+	opacity: 0.6;
 }
 
 columnview.data-table cell,
@@ -626,12 +657,11 @@ popover > contents {
 /* ---- track list -------------------------------------------------- */
 
 columnview.data-table > listview > row {
-	min-height: 44px;
-	border-bottom: 1px solid #14181f;
+	min-height: 40px;
 }
 
 .row-title {
-	font-weight: 700;
+	font-weight: 600;
 	font-size: 13px;
 }
 
@@ -640,10 +670,6 @@ columnview.data-table > listview > row {
 	color: @dim;
 }
 
-.played .row-title,
-label.played {
-	color: @dim;
-}
 
 .row-state {
 	color: @deck-a;
@@ -658,16 +684,15 @@ label.played {
 	font-family: "JetBrains Mono", "DejaVu Sans Mono", monospace;
 	font-size: 11px;
 	font-weight: 700;
-	padding: 2px 8px;
-	border-radius: 10px;
-	border: 1px solid @line;
+	padding: 3px 9px;
+	border-radius: 4px;
+	border: none;
 	background: @panel2;
 }
 
 .pill-bpm {
-	color: #fde047;
-	border-color: alpha(#fde047, 0.4);
-	background: alpha(#fde047, 0.1);
+	color: #e5c94a;
+	background: #1b2029;
 }
 
 button.row-preview {
@@ -776,18 +801,18 @@ button.sc-login.logged-in {
 }
 
 /* Camelot wheel colours for the key pills */
-.pill.camelot-1 { background: alpha(#4ade80, 0.18); color: #4ade80; border-color: alpha(#4ade80, 0.6); }
-.pill.camelot-2 { background: alpha(#22d3ee, 0.18); color: #22d3ee; border-color: alpha(#22d3ee, 0.6); }
-.pill.camelot-3 { background: alpha(#38bdf8, 0.18); color: #38bdf8; border-color: alpha(#38bdf8, 0.6); }
-.pill.camelot-4 { background: alpha(#818cf8, 0.18); color: #818cf8; border-color: alpha(#818cf8, 0.6); }
-.pill.camelot-5 { background: alpha(#c084fc, 0.18); color: #c084fc; border-color: alpha(#c084fc, 0.6); }
-.pill.camelot-6 { background: alpha(#f472b6, 0.18); color: #f472b6; border-color: alpha(#f472b6, 0.6); }
-.pill.camelot-7 { background: alpha(#fb7185, 0.18); color: #fb7185; border-color: alpha(#fb7185, 0.6); }
-.pill.camelot-8 { background: alpha(#f97316, 0.18); color: #f97316; border-color: alpha(#f97316, 0.6); }
-.pill.camelot-9 { background: alpha(#fbbf24, 0.18); color: #fbbf24; border-color: alpha(#fbbf24, 0.6); }
-.pill.camelot-10 { background: alpha(#facc15, 0.18); color: #facc15; border-color: alpha(#facc15, 0.6); }
-.pill.camelot-11 { background: alpha(#a3e635, 0.18); color: #a3e635; border-color: alpha(#a3e635, 0.6); }
-.pill.camelot-12 { background: alpha(#34d399, 0.18); color: #34d399; border-color: alpha(#34d399, 0.6); }
+.pill.camelot-1 { background: alpha(#4ade80, 0.18); color: #4ade80; }
+.pill.camelot-2 { background: alpha(#22d3ee, 0.18); color: #22d3ee; }
+.pill.camelot-3 { background: alpha(#38bdf8, 0.18); color: #38bdf8; }
+.pill.camelot-4 { background: alpha(#818cf8, 0.18); color: #818cf8; }
+.pill.camelot-5 { background: alpha(#c084fc, 0.18); color: #c084fc; }
+.pill.camelot-6 { background: alpha(#f472b6, 0.18); color: #f472b6; }
+.pill.camelot-7 { background: alpha(#fb7185, 0.18); color: #fb7185; }
+.pill.camelot-8 { background: alpha(#f97316, 0.18); color: #f97316; }
+.pill.camelot-9 { background: alpha(#fbbf24, 0.18); color: #fbbf24; }
+.pill.camelot-10 { background: alpha(#facc15, 0.18); color: #facc15; }
+.pill.camelot-11 { background: alpha(#a3e635, 0.18); color: #a3e635; }
+.pill.camelot-12 { background: alpha(#34d399, 0.18); color: #34d399; }
 
 notebook > header > tabs > tab:checked,
 notebook > header tab:checked {
@@ -803,10 +828,10 @@ notebook > header tab:hover {
 /* ---- library sidebar --------------------------------------------- */
 
 .side-panel {
-	background: @panel;
-	border: 1px solid @line;
+	background: #10131a;
+	border: 1px solid #1f2430;
 	border-radius: 10px;
-	padding: 6px;
+	padding: 8px;
 }
 
 list.sidebar {
@@ -814,13 +839,15 @@ list.sidebar {
 }
 
 list.sidebar > row.side-row {
-	padding: 6px 8px;
-	border-radius: 8px;
+	padding: 8px 10px;
+	border-radius: 6px;
 	color: @dim;
+	font-size: 12.5px;
 }
 
 list.sidebar > row.side-row:selected {
-	background: alpha(@deck-a, 0.2);
+	background: linear-gradient(90deg, alpha(@deck-a, 0.18),
+				    alpha(@deck-a, 0.03));
 	color: @fg;
 }
 
