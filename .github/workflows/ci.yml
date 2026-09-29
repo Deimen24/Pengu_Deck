@@ -1,9 +1,13 @@
 name: CI
 
+# A push only builds and tests once, on Arch.  The packaging matrix for
+# every distribution runs for pull requests and manual runs; releases
+# are built by release.yml when a version is published.
 on:
   push:
     branches: ['**']
   pull_request:
+  workflow_dispatch:
 
 jobs:
   arch:
@@ -24,17 +28,20 @@ jobs:
       - name: Test
         run: meson test -C build --print-errorlogs
       - name: Package (makepkg)
+        if: github.event_name != 'push'
         run: |
           useradd -m builder
           chown -R builder .
           su builder -c 'cd packaging/arch && makepkg -f --noconfirm'
           ls packaging/arch/*.pkg.tar.*
       - uses: actions/upload-artifact@v5
+        if: github.event_name != 'push'
         with:
           name: pengu-deck-arch
           path: packaging/arch/*.pkg.tar.*
 
   ubuntu:
+    if: github.event_name != 'push'
     name: Ubuntu 24.04 (Debian package)
     runs-on: ubuntu-24.04
     steps:
@@ -63,6 +70,7 @@ jobs:
           path: dist/*.deb
 
   fedora:
+    if: github.event_name != 'push'
     name: Fedora (RPM)
     runs-on: ubuntu-latest
     container: fedora:latest
@@ -92,6 +100,7 @@ jobs:
           path: ~/rpmbuild/RPMS/*/*.rpm
 
   flatpak:
+    if: github.event_name != 'push'
     name: Flatpak
     runs-on: ubuntu-latest
     container:
