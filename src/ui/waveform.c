@@ -22,6 +22,20 @@ struct _PdWaveform {
 	gboolean last_ready;
 	GdkRGBA accent;
 
+	/*
+	 * The columns are expensive to build, so they are rendered once
+	 * into a node covering a few screens around the playhead and only
+	 * translated per frame until the playhead leaves that window, the
+	 * zoom changes or more of the track has been decoded.
+	 */
+	GskRenderNode *cache;
+	const struct track *cache_track;
+	double cache_f0;	/* frame at the node's x = 0 */
+	double cache_fpp;	/* frames per pixel it was built for */
+	float cache_px;		/* its width in pixels */
+	float cache_h;
+	size_t cache_bins;
+
 	/* drag state */
 	double drag_pos;
 	gboolean was_playing;
@@ -63,6 +77,20 @@ static void fill(GtkSnapshot *snap, const char *hex, float alpha,
 	fill_rgba(snap, c, alpha, x, y, w, h);
 }
 
+static const GdkRGBA *band_colours(void)
+{
+	static GdkRGBA c[3];
+	static gboolean ready;
+
+	if (!ready) {
+		gdk_rgba_parse(&c[0], "#3d7ef5");
+		gdk_rgba_parse(&c[1], "#e9a03b");
+		gdk_rgba_parse(&c[2], "#f3f3f3");
+		ready = TRUE;
+	}
+	return c;
+}
+
 /* Draw one column of the three band waveform, bins [b0, b1). */
 static void draw_column(GtkSnapshot *snap, const struct track *t,
 			size_t b0, size_t b1, float x, float w, float mid,
@@ -85,9 +113,86 @@ static void draw_column(GtkSnapshot *snap, const struct track *t,
 	hl = half * lo / 255.0f;
 	hm = half * mi / 255.0f;
 	hh = half * hi / 255.0f;
-	fill(snap, "#3d7ef5", 0.95f, x, mid - hl, w, 2 * hl);
-	fill(snap, "#e9a03b", 0.85f, x, mid - hm, w, 2 * hm);
-	fill(snap, "#f3f3f3", 0.75f, x, mid - hh, w, 2 * hh);
+	fill_rgba(snap, band_colours()[0], 0.95f, x, mid - hl, w, 2 * hl);
+	fill_rgba(snap, band_colours()[1], 0.85f, x, mid - hm, w, 2 * hm);
+	fill_rgba(snap, band_colours()[2], 0.75f, x, mid - hh, w, 2 * hh);
+}
+
+static void drop_cache(PdWaveform *wf)
+{
+	g_clear_pointer(&wf->cache, gsk_render_node_unref);
+	wf->cache_track = NULL;
+}
+
+/* Build the column node for @px pixels starting at frame @f0. */
+static void build_cache(PdWaveform *wf, const struct track *t, double f0,
+			double fpp, float px, float h)
+{
+	GtkSnapshot *snap = gtk_snapshot_new();
+	float mid = h / 2.0f, half = mid - 2;
+	size_t bins = track_bins(t);
+	float x;
+
+	for (x = 0; x < px; x += 1.0f) {
+		double c0 = f0 + x * fpp, c1 = c0 + fpp;
+		size_t b0, b1;
+
+		if (c1 <= 0.0)
+			continue;
+		if (c0 < 0.0)
+			c0 = 0.0;
+		b0 = (size_t)c0 >> WAVE_BIN_SHIFT;
+		b1 = ((size_t)c1 >> WAVE_BIN_SHIFT) + 1;
+		if (b0 >= bins)
+			break;
+		if (b1 > bins)
+			b1 = bins;
+		draw_column(snap, t, b0, b1, x, 1.0f, mid, half);
+	}
+	drop_cache(wf);
+	wf->cache = gtk_snapshot_free_to_node(snap);
+	wf->cache_track = t;
+	wf->cache_f0 = f0;
+	wf->cache_fpp = fpp;
+	wf->cache_px = px;
+	wf->cache_h = h;
+	wf->cache_bins = bins;
+}
+
+/*
+ * Draw the columns for the visible range [frame_at_x0, +width*fpp),
+ * reusing the cached node when it still covers that range.
+ */
+static void draw_columns(PdWaveform *wf, GtkSnapshot *snap,
+			 const struct track *t, double frame_at_x0,
+			 double fpp, float width, float height)
+{
+	double need0 = frame_at_x0, need1 = frame_at_x0 + width * fpp;
+	graphene_rect_t clip;
+	gboolean ok = wf->cache && wf->cache_track == t &&
+		      wf->cache_fpp == fpp && wf->cache_h == height &&
+		      wf->cache_bins == track_bins(t) &&
+		      need0 >= wf->cache_f0 &&
+		      need1 <= wf->cache_f0 + wf->cache_px * fpp;
+
+	if (!ok) {
+		if (wf->overview)
+			build_cache(wf, t, 0.0, fpp, width, height);
+		else
+			build_cache(wf, t, frame_at_x0 - width * fpp, fpp,
+				    3.0f * width, height);
+	}
+	if (!wf->cache)
+		return;
+	graphene_rect_init(&clip, 0, 0, width, height);
+	gtk_snapshot_push_clip(snap, &clip);
+	gtk_snapshot_save(snap);
+	gtk_snapshot_translate(snap, &GRAPHENE_POINT_INIT(
+				(float)((wf->cache_f0 - frame_at_x0) / fpp),
+				0));
+	gtk_snapshot_append_node(snap, wf->cache);
+	gtk_snapshot_restore(snap);
+	gtk_snapshot_pop(snap);
 }
 
 static void draw_markers(PdWaveform *wf, GtkSnapshot *snap,
@@ -144,18 +249,17 @@ static void wave_snapshot(GtkWidget *w, GtkSnapshot *snap)
 	struct deck *d = wf->deck;
 	struct track *t = deck_track(d);
 	float width = gtk_widget_get_width(w), height = gtk_widget_get_height(w);
-	float mid = height / 2.0f, half = mid - 2;
+	float mid = height / 2.0f;
 	double pos = deck_position(d);
 	double frames_per_px, frame_at_x0, playhead_x;
-	size_t bins, len;
-	float x;
+	size_t len;
 
 	fill(snap, "#101215", 1.0f, 0, 0, width, height);
 	if (!t) {
+		drop_cache(wf);
 		fill(snap, "#ffffff", 0.1f, 0, mid, width, 1);
 		return;
 	}
-	bins = track_bins(t);
 	len = track_length(t);
 
 	if (wf->overview) {
@@ -169,23 +273,7 @@ static void wave_snapshot(GtkWidget *w, GtkSnapshot *snap)
 	}
 
 	/* the waveform itself, one column per pixel */
-	for (x = 0; x < width; x += 1.0f) {
-		double f0 = frame_at_x0 + x * frames_per_px;
-		double f1 = f0 + frames_per_px;
-		size_t b0, b1;
-
-		if (f1 <= 0.0)
-			continue;
-		if (f0 < 0.0)
-			f0 = 0.0;
-		b0 = (size_t)f0 >> WAVE_BIN_SHIFT;
-		b1 = ((size_t)f1 >> WAVE_BIN_SHIFT) + 1;
-		if (b0 >= bins)
-			break;
-		if (b1 > bins)
-			b1 = bins;
-		draw_column(snap, t, b0, b1, x, 1.0f, mid, half);
-	}
+	draw_columns(wf, snap, t, frame_at_x0, frames_per_px, width, height);
 
 	/* Played part of the overview in the deck colour. */
 	if (wf->overview)
@@ -310,6 +398,7 @@ static void pd_waveform_dispose(GObject *obj)
 		gtk_widget_remove_tick_callback(GTK_WIDGET(wf), wf->tick);
 		wf->tick = 0;
 	}
+	drop_cache(wf);
 	G_OBJECT_CLASS(pd_waveform_parent_class)->dispose(obj);
 }
 

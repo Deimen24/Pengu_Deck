@@ -31,10 +31,50 @@ struct _PdWindow {
 	GtkWidget *toast_label;
 	GtkWidget *audio_label;
 	guint toast_id;
+	guint inhibit_timer;
+	guint inhibit_cookie;	/* session sleep/idle inhibit, 0 = none */
 	int next_deck;
 };
 
 G_DEFINE_FINAL_TYPE(PdWindow, pd_window, GTK_TYPE_APPLICATION_WINDOW)
+
+/* ---- keep the machine awake while music plays -------------------- */
+
+#define INHIBIT_POLL_MS	2000
+
+static gboolean audio_running(struct app *a)
+{
+	int i;
+
+	for (i = 0; i < ENGINE_DECKS; i++)
+		if (atomic_load(&a->engine.deck[i].playing))
+			return TRUE;
+	return engine_sink_active(&a->engine, SINK_RECORD) ||
+	       engine_sink_active(&a->engine, SINK_BROADCAST);
+}
+
+/*
+ * Ask the session not to suspend or blank the screen while a deck
+ * plays, a recording runs or the stream is live; lift it again when
+ * everything is stopped, so an idle laptop can still sleep.
+ */
+static gboolean inhibit_tick(gpointer data)
+{
+	PdWindow *w = data;
+	gboolean want = audio_running(w->app);
+
+	if (want && !w->inhibit_cookie)
+		w->inhibit_cookie = gtk_application_inhibit(w->app->gtk,
+				GTK_WINDOW(w),
+				GTK_APPLICATION_INHIBIT_SUSPEND |
+				GTK_APPLICATION_INHIBIT_IDLE,
+				"Playing music");
+	else if (!want && w->inhibit_cookie) {
+		gtk_application_uninhibit(w->app->gtk, w->inhibit_cookie);
+		w->inhibit_cookie = 0;
+	}
+	return G_SOURCE_CONTINUE;
+}
 
 /* ---- toast ------------------------------------------------------- */
 
@@ -460,6 +500,14 @@ static void pd_window_dispose(GObject *obj)
 		g_source_remove(w->toast_id);
 		w->toast_id = 0;
 	}
+	if (w->inhibit_timer) {
+		g_source_remove(w->inhibit_timer);
+		w->inhibit_timer = 0;
+	}
+	if (w->inhibit_cookie) {
+		gtk_application_uninhibit(w->app->gtk, w->inhibit_cookie);
+		w->inhibit_cookie = 0;
+	}
 	if (w->app && w->app->toast_data == w) {
 		w->app->toast = NULL;
 		w->app->toast_data = NULL;
@@ -505,6 +553,7 @@ GtkWidget *pd_window_new(struct app *app)
 	app->load_selected = ui_load_selected;
 	app->ui_data = w;
 	gtk_window_set_title(GTK_WINDOW(w), "Pengu Deck");
+	w->inhibit_timer = g_timeout_add(INHIBIT_POLL_MS, inhibit_tick, w);
 	gtk_window_set_default_size(GTK_WINDOW(w), 1440, 900);
 	gtk_window_set_icon_name(GTK_WINDOW(w), PD_APP_ID);
 	gtk_window_set_titlebar(GTK_WINDOW(w), build_header(w));

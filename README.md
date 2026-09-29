@@ -132,6 +132,10 @@ artist link. Streams start within a second and are cached to
 and the cache can be cleared in Preferences. Preview-only tracks play
 as 30 s snippets and are marked "(preview)".
 
+While a deck plays, a recording runs or the stream is live the app asks
+the desktop session not to suspend or blank the screen; the inhibit is
+lifted as soon as everything is stopped.
+
 ## Recording, broadcasting, microphone
 
 **REC** records the master to `~/Music/Pengu Deck Mixes`, **LIVE**

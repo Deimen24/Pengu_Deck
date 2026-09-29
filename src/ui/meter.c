@@ -10,6 +10,7 @@
 #define DECAY		0.92f
 #define HOLD_DECAY	0.985f
 #define MIN_DB		-40.0f
+#define SILENT		1e-2f		/* -40 dB, the bottom of the scale */
 
 struct _PdMeter {
 	GtkWidget parent;
@@ -110,11 +111,23 @@ void pd_meter_update(PdMeter *m, float left, float right)
 	float in[2] = { left, right };
 	int c;
 
+	gboolean changed = FALSE;
+
 	for (c = 0; c < 2; c++) {
-		m->level[c] = in[c] > m->level[c] ? in[c] :
+		float level = in[c] > m->level[c] ? in[c] :
 			      m->level[c] * DECAY;
-		m->hold[c] = in[c] > m->hold[c] ? in[c] :
-			     m->hold[c] * HOLD_DECAY;
+		float hold = in[c] > m->hold[c] ? in[c] : m->hold[c] * HOLD_DECAY;
+
+		/* below the scale everything draws the same: stop there */
+		if (level < SILENT)
+			level = 0.0f;
+		if (hold < SILENT)
+			hold = 0.0f;
+		if (level != m->level[c] || hold != m->hold[c])
+			changed = TRUE;
+		m->level[c] = level;
+		m->hold[c] = hold;
 	}
-	gtk_widget_queue_draw(GTK_WIDGET(m));
+	if (changed)
+		gtk_widget_queue_draw(GTK_WIDGET(m));
 }
