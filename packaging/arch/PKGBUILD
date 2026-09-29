@@ -17,6 +17,9 @@ source=()
 sha256sums=()
 
 build() {
+	# always configure afresh: a build dir left by an earlier run would
+	# otherwise keep its old configuration and version
+	rm -rf build
 	arch-meson "$startdir/../.." build -Dkeylock=enabled
 	meson compile -C build
 }
