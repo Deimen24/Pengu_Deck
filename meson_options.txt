@@ -1,0 +1,4 @@
+option('keylock', type: 'feature', value: 'auto',
+	description: 'Tempo change without pitch change (needs Rubber Band)')
+option('tests', type: 'boolean', value: true,
+	description: 'Build the unit tests')

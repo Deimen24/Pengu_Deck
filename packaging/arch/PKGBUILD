@@ -1,0 +1,36 @@
+# Maintainer: deimen24
+# Build from a git checkout:  cd packaging/arch && makepkg -si
+pkgname=pengu-deck
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Two deck DJ software with local files and SoundCloud streaming"
+arch=('x86_64' 'aarch64')
+url="https://github.com/deimen24/Pengu_Deck"
+license=('GPL-3.0-or-later')
+depends=('gtk4' 'glib2' 'json-glib' 'curl' 'ffmpeg' 'rubberband'
+	 'libpulse' 'alsa-lib' 'hicolor-icon-theme')
+makedepends=('meson' 'ninja' 'pkgconf' 'git')
+optdepends=('pipewire-pulse: PipeWire output (default on CachyOS)'
+	    'pipewire-jack: low latency JACK output through PipeWire'
+	    'jack2: native JACK output')
+source=()
+sha256sums=()
+
+pkgver() {
+	cd "$startdir/../.."
+	git describe --tags --long 2>/dev/null | sed 's/^v//;s/\([^-]*-g\)/r\1/;s/-/./g' \
+		|| echo "$pkgver"
+}
+
+build() {
+	arch-meson "$startdir/../.." build -Dkeylock=enabled
+	meson compile -C build
+}
+
+check() {
+	meson test -C build --print-errorlogs
+}
+
+package() {
+	meson install -C build --destdir "$pkgdir"
+}

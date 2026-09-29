@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  arch:
+    name: Arch Linux (CachyOS compatible)
+    runs-on: ubuntu-latest
+    container: archlinux:base-devel
+    steps:
+      - name: Install dependencies
+        run: |
+          pacman -Syu --noconfirm --needed git meson ninja pkgconf gtk4 \
+            glib2 json-glib curl ffmpeg rubberband libpulse alsa-lib \
+            desktop-file-utils
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          meson setup build -Dkeylock=enabled
+          meson compile -C build
+      - name: Test
+        run: meson test -C build --print-errorlogs
+      - name: Package (makepkg)
+        run: |
+          useradd -m builder
+          chown -R builder .
+          su builder -c 'cd packaging/arch && makepkg -f --noconfirm'
+          ls packaging/arch/*.pkg.tar.*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pengu-deck-arch
+          path: packaging/arch/*.pkg.tar.*
+
+  ubuntu:
+    name: Ubuntu 24.04 (Debian package)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends meson ninja-build \
+            pkgconf libgtk-4-dev libglib2.0-dev libjson-glib-dev \
+            libcurl4-openssl-dev libavformat-dev libavcodec-dev \
+            libavutil-dev libswresample-dev librubberband-dev libpulse-dev \
+            libasound2-dev desktop-file-utils debhelper devscripts
+      - name: Build and test
+        run: |
+          meson setup build -Dkeylock=enabled
+          meson compile -C build
+          meson test -C build --print-errorlogs
+      - name: Package (dpkg-buildpackage)
+        run: |
+          dpkg-buildpackage -us -uc -b
+          mkdir -p dist && mv ../pengu-deck_*.deb dist/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pengu-deck-deb
+          path: dist/*.deb
+
+  fedora:
+    name: Fedora (RPM)
+    runs-on: ubuntu-latest
+    container: fedora:latest
+    steps:
+      - name: Install dependencies
+        run: |
+          dnf install -y gcc meson ninja-build pkgconf gtk4-devel \
+            glib2-devel json-glib-devel libcurl-devel rubberband-devel \
+            pulseaudio-libs-devel alsa-lib-devel desktop-file-utils \
+            rpm-build git
+          dnf install -y \
+            https://mirrors.rpmfusion.org/free/fedora/rpmfusion-free-release-$(rpm -E %fedora).noarch.rpm
+          dnf install -y ffmpeg-devel
+      - uses: actions/checkout@v4
+      - name: Build and test
+        run: |
+          meson setup build -Dkeylock=enabled
+          meson compile -C build
+          meson test -C build --print-errorlogs
+      - name: Package (rpmbuild)
+        run: |
+          mkdir -p ~/rpmbuild/SOURCES
+          git archive --prefix=Pengu_Deck-0.1.0/ -o ~/rpmbuild/SOURCES/Pengu_Deck-0.1.0.tar.gz HEAD
+          rpmbuild -bb packaging/fedora/pengu-deck.spec
+          ls ~/rpmbuild/RPMS/*/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pengu-deck-rpm
+          path: ~/rpmbuild/RPMS/*/*.rpm
+
+  flatpak:
+    name: Flatpak
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-47
+      options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
+        with:
+          bundle: pengu-deck.flatpak
+          manifest-path: packaging/flatpak/io.github.deimen24.PenguDeck.yml
+          cache-key: flatpak-builder-${{ github.sha }}

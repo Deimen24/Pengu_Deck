@@ -1,0 +1,44 @@
+# Build:  flatpak-builder --user --install --force-clean build-flatpak \
+#             packaging/flatpak/io.github.deimen24.PenguDeck.yml
+# The GNOME runtime ships GTK 4, FFmpeg (full) and json-glib.
+app-id: io.github.deimen24.PenguDeck
+runtime: org.gnome.Platform
+runtime-version: '47'
+sdk: org.gnome.Sdk
+command: pengu-deck
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  - --socket=pulseaudio
+  - --share=network
+  - --device=dri
+  - --filesystem=xdg-music
+  - --filesystem=home
+  - --env=PIPEWIRE_RUNTIME_DIR=/run/user/1000
+modules:
+  - name: rubberband
+    buildsystem: meson
+    config-opts:
+      - -Ddefault_library=shared
+      - -Dfft=builtin
+      - -Dresampler=builtin
+      - -Djni=disabled
+      - -Dvamp=disabled
+      - -Dladspa=disabled
+      - -Dlv2=disabled
+      - -Dcmdline=disabled
+    sources:
+      - type: git
+        url: https://github.com/breakfastquay/rubberband.git
+        tag: v3.3.0
+    cleanup:
+      - /include
+      - /lib/pkgconfig
+  - name: pengu-deck
+    buildsystem: meson
+    config-opts:
+      - -Dkeylock=enabled
+    sources:
+      - type: dir
+        path: ../..

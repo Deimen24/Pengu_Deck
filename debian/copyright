@@ -1,0 +1,11 @@
+Format: https://www.debian.org/doc/packaging-manuals/copyright-format/1.0/
+Upstream-Name: pengu-deck
+Source: https://github.com/deimen24/Pengu_Deck
+
+Files: *
+Copyright: 2026 Pengu Deck contributors
+License: GPL-3.0-or-later
+
+Files: third_party/miniaudio/*
+Copyright: 2025 David Reid
+License: MIT-0 or Unlicense

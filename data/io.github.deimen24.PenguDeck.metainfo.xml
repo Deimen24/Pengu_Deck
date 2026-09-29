@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.deimen24.PenguDeck</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <name>Pengu Deck</name>
+  <summary>Two deck DJ software with local files and SoundCloud</summary>
+  <description>
+    <p>
+      Pengu Deck is a lightweight DJ application for Linux. It plays any
+      audio format FFmpeg understands and streams tracks straight from
+      SoundCloud into a deck.
+    </p>
+    <ul>
+      <li>Two decks with coloured waveforms, beat grid and scratching</li>
+      <li>Automatic BPM detection, sync and beat-matched loops</li>
+      <li>Hot cues and cue points remembered per track</li>
+      <li>Three band EQ with kills, filter, trim, crossfader curves</li>
+      <li>Keylock (tempo change without pitch change)</li>
+      <li>Headphone cue via split output or a 4 channel interface</li>
+      <li>Record your mix to WAV</li>
+      <li>SoundCloud search, links, playlists and your likes</li>
+    </ul>
+  </description>
+  <launchable type="desktop-id">io.github.deimen24.PenguDeck.desktop</launchable>
+  <url type="homepage">https://github.com/deimen24/Pengu_Deck</url>
+  <url type="bugtracker">https://github.com/deimen24/Pengu_Deck/issues</url>
+  <content_rating type="oars-1.1" />
+  <provides>
+    <binary>pengu-deck</binary>
+  </provides>
+  <releases>
+    <release version="0.1.0" date="2026-09-29">
+      <description>
+        <p>First release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

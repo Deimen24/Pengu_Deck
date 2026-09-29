@@ -1,0 +1,23 @@
+Source: pengu-deck
+Section: sound
+Priority: optional
+Maintainer: deimen24 <da.husmann24@gmail.com>
+Build-Depends: debhelper-compat (= 13), meson (>= 0.62), ninja-build,
+ pkgconf, libgtk-4-dev (>= 4.10), libglib2.0-dev, libjson-glib-dev,
+ libcurl4-openssl-dev | libcurl4-gnutls-dev, libavformat-dev,
+ libavcodec-dev, libavutil-dev, libswresample-dev, librubberband-dev,
+ libpulse-dev, libasound2-dev, desktop-file-utils
+Standards-Version: 4.6.2
+Homepage: https://github.com/deimen24/Pengu_Deck
+Rules-Requires-Root: no
+
+Package: pengu-deck
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Recommends: pipewire-pulse | pulseaudio
+Suggests: pipewire-jack | jackd2
+Description: Two deck DJ software with local files and SoundCloud streaming
+ Pengu Deck is a lightweight DJ application for Linux with two decks,
+ coloured waveforms, BPM detection, sync, loops, hot cues, a three band
+ EQ mixer with kills and filter, keylock, headphone cueing, recording
+ and SoundCloud search and streaming.

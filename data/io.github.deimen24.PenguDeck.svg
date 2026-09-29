@@ -1,0 +1,24 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a2e35"/>
+      <stop offset="1" stop-color="#16181c"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="112" height="112" rx="24" fill="url(#bg)"/>
+  <!-- two platters -->
+  <circle cx="44" cy="52" r="22" fill="#101215" stroke="#4fc3f7" stroke-width="4"/>
+  <circle cx="84" cy="52" r="22" fill="#101215" stroke="#ff8a65" stroke-width="4"/>
+  <circle cx="44" cy="52" r="5" fill="#4fc3f7"/>
+  <circle cx="84" cy="52" r="5" fill="#ff8a65"/>
+  <!-- penguin belly on the left platter -->
+  <ellipse cx="44" cy="55" rx="9" ry="12" fill="#e6e6e6" opacity="0.9"/>
+  <circle cx="44" cy="45" r="6" fill="#101215"/>
+  <circle cx="42" cy="44" r="1.6" fill="#fff"/>
+  <circle cx="46" cy="44" r="1.6" fill="#fff"/>
+  <path d="M42 47 L46 47 L44 50 Z" fill="#ffb74d"/>
+  <!-- crossfader -->
+  <rect x="24" y="90" width="80" height="8" rx="4" fill="#101215" stroke="#343941" stroke-width="2"/>
+  <rect x="56" y="84" width="16" height="20" rx="3" fill="#cfd3d8"/>
+</svg>

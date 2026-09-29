@@ -1,0 +1,359 @@
+/* Pengu Deck - dark club theme */
+
+window {
+	background: #16181c;
+	color: #e6e6e6;
+}
+
+headerbar {
+	background: #1c1f24;
+	border-bottom: 1px solid #2a2e35;
+	color: #e6e6e6;
+}
+
+headerbar .title {
+	font-weight: 700;
+	letter-spacing: 1px;
+}
+
+deck {
+	background: #1c1f24;
+	border: 1px solid #2a2e35;
+	border-radius: 8px;
+	padding: 8px;
+}
+
+deck.deck-a { border-top: 3px solid #4fc3f7; }
+deck.deck-b { border-top: 3px solid #ff8a65; }
+
+mixer {
+	background: #1c1f24;
+	border: 1px solid #2a2e35;
+	border-radius: 8px;
+	padding: 8px;
+}
+
+.strip {
+	padding: 2px 4px;
+	border-radius: 6px;
+	background: #191c20;
+}
+
+.deck-badge {
+	font-size: 22px;
+	font-weight: 800;
+	padding: 4px 12px;
+	border-radius: 6px;
+	color: #16181c;
+}
+
+label.deck-badge.deck-a { background: #4fc3f7; }
+label.deck-badge.deck-b { background: #ff8a65; }
+
+.track-title {
+	font-size: 15px;
+	font-weight: 700;
+}
+
+.bpm {
+	font-size: 20px;
+	font-weight: 700;
+	font-family: monospace;
+	color: #ffd54f;
+}
+
+.time {
+	font-size: 15px;
+	font-family: monospace;
+}
+
+.mono {
+	font-family: monospace;
+}
+
+.section-label {
+	font-size: 10px;
+	font-weight: 700;
+	letter-spacing: 1.5px;
+	color: #8a919c;
+	margin: 0 6px;
+}
+
+.dim-label {
+	color: #8a919c;
+}
+
+.error {
+	color: #ff6b5e;
+}
+
+waveform {
+	border-radius: 4px;
+	background: #101215;
+}
+
+meter {
+	border-radius: 2px;
+}
+
+button {
+	background: #262a31;
+	color: #e6e6e6;
+	border: 1px solid #343941;
+	border-radius: 5px;
+	padding: 4px 8px;
+	min-height: 28px;
+	box-shadow: none;
+	text-shadow: none;
+	font-weight: 600;
+}
+
+button:hover {
+	background: #30353d;
+}
+
+button:active,
+button:checked {
+	background: #3b414a;
+}
+
+button.play-button {
+	min-width: 64px;
+	font-size: 18px;
+	background: #2c4a3a;
+	border-color: #3a6b4f;
+}
+
+button.play-button:checked {
+	background: #43c26d;
+	color: #0d1a12;
+}
+
+button.cue-button {
+	min-width: 56px;
+	background: #4a3a1e;
+	border-color: #6b5427;
+	color: #ffb74d;
+}
+
+button.cue-button:active {
+	background: #ffa726;
+	color: #1a1200;
+}
+
+button.sync-button {
+	background: #1e3a4a;
+	border-color: #27566b;
+	color: #4fc3f7;
+}
+
+button.hotcue {
+	min-width: 36px;
+	color: #8a919c;
+}
+
+button.hotcue.set {
+	background: #ef5da8;
+	border-color: #ef5da8;
+	color: #1a0a12;
+}
+
+button.loop-size {
+	min-width: 24px;
+	padding: 4px 5px;
+}
+
+button.loop-toggle:checked {
+	background: #7bd88f;
+	color: #0d1a12;
+}
+
+button.bend {
+	min-width: 30px;
+	padding: 4px 6px;
+}
+
+button.kill {
+	min-width: 20px;
+	min-height: 20px;
+	padding: 0 6px;
+	font-size: 10px;
+}
+
+button.kill:checked {
+	background: #e0463b;
+	color: #fff;
+}
+
+button.pfl:checked {
+	background: #4fc3f7;
+	color: #06202b;
+}
+
+button.record:checked {
+	background: #e0463b;
+	color: #fff;
+}
+
+scale.pitch-fader,
+scale.channel-fader {
+	min-width: 30px;
+	padding: 6px 4px;
+}
+
+scale.crossfader {
+	padding: 4px 8px;
+}
+
+scale > trough {
+	background: #101215;
+	border: 1px solid #2a2e35;
+	border-radius: 4px;
+}
+
+scale.pitch-fader > trough,
+scale.channel-fader > trough {
+	min-width: 8px;
+}
+
+scale.crossfader > trough {
+	min-height: 10px;
+}
+
+/*
+ * The default theme sizes sliders with negative margins and swaps in an
+ * image for scales with marks; these selectors outrank both.
+ */
+scale > trough > slider,
+scale.vertical.marks-before:not(.marks-after) > trough > slider,
+scale.horizontal.marks-after:not(.marks-before) > trough > slider {
+	background-color: #cfd3d8;
+	background-image: none;
+	border: 1px solid #5a606a;
+	border-radius: 3px;
+	box-shadow: none;
+}
+
+scale.pitch-fader > trough > slider,
+scale.channel-fader > trough > slider,
+scale.pitch-fader.vertical.marks-before:not(.marks-after) > trough > slider {
+	margin: 0 -9px;
+	min-width: 26px;
+	min-height: 16px;
+}
+
+scale.crossfader > trough > slider,
+scale.crossfader.horizontal.marks-after:not(.marks-before) > trough > slider {
+	margin: -8px 0;
+	min-width: 22px;
+	min-height: 26px;
+}
+
+scale > trough > highlight,
+scale > trough > fill {
+	background: none;
+	border: none;
+	margin: 0;
+	min-width: 0;
+	min-height: 0;
+}
+
+scale marks mark indicator {
+	background: #8a919c;
+}
+
+notebook > header {
+	background: #16181c;
+}
+
+notebook > header tab {
+	padding: 4px 16px;
+	color: #8a919c;
+}
+
+notebook > header tab:checked {
+	color: #e6e6e6;
+	border-bottom: 2px solid #4fc3f7;
+}
+
+columnview.data-table {
+	background: #101215;
+	color: #e6e6e6;
+}
+
+columnview.data-table > header > button {
+	background: #1c1f24;
+	border: none;
+	border-bottom: 1px solid #2a2e35;
+	border-radius: 0;
+	padding: 4px 8px;
+	font-weight: 600;
+	color: #8a919c;
+}
+
+columnview.data-table > listview > row {
+	padding: 1px 0;
+}
+
+columnview.data-table > listview > row:selected {
+	background: #27566b;
+}
+
+columnview.data-table > listview > row:hover {
+	background: #1f232a;
+}
+
+columnview.data-table cell {
+	padding: 3px 8px;
+}
+
+entry,
+searchbar entry {
+	background: #101215;
+	color: #e6e6e6;
+	border: 1px solid #2a2e35;
+	border-radius: 5px;
+	min-height: 30px;
+}
+
+.placeholder {
+	font-size: 14px;
+	padding: 24px;
+}
+
+.toast {
+	background: #2a2e35;
+	color: #e6e6e6;
+	border: 1px solid #4fc3f7;
+	border-radius: 20px;
+	padding: 10px 20px;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.drag-label {
+	background: #27566b;
+	color: #fff;
+	padding: 6px 12px;
+	border-radius: 6px;
+}
+
+paned > separator {
+	background: #2a2e35;
+	min-height: 4px;
+}
+
+popover.menu {
+	background: #1c1f24;
+	color: #e6e6e6;
+}
+
+tooltip {
+	background: #2a2e35;
+	color: #e6e6e6;
+	border-radius: 4px;
+}
+
+dropdown button,
+dropdown > button {
+	font-weight: 400;
+}

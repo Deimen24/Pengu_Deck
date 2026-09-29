@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Pengu Deck
+GenericName=DJ Software
+Comment=Mix local files and SoundCloud tracks on two decks
+Exec=pengu-deck %F
+Icon=io.github.deimen24.PenguDeck
+Terminal=false
+Categories=AudioVideo;Audio;Music;Mixer;GTK;
+Keywords=dj;mix;music;soundcloud;deck;turntable;
+MimeType=audio/mpeg;audio/flac;audio/ogg;audio/x-wav;audio/mp4;audio/aac;audio/x-aiff;audio/opus;
+StartupNotify=true
+StartupWMClass=pengu-deck

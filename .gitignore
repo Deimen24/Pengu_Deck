@@ -1,0 +1,12 @@
+build/
+build-*/
+.flatpak-builder/
+*.o
+*.a
+*.flatpak
+*.tar.gz
+*.tar.zst
+*.rpm
+*.deb
+packaging/arch/pkg/
+packaging/arch/src/
