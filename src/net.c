@@ -8,7 +8,14 @@
 #include "pd-build.h"
 
 #define MAX_BODY	(16 * 1024 * 1024)
-#define USER_AGENT	"Mozilla/5.0 (X11; Linux x86_64) PenguDeck/" PD_VERSION
+/*
+ * SoundCloud's bot detection flags clients that do not look like the
+ * web player, per IP address, which then also blocks the embedded
+ * login.  Send what a browser sends.
+ */
+#define USER_AGENT \
+	"Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 " \
+	"(KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 
 G_DEFINE_QUARK(pd-net-error-quark, net_error)
 
@@ -53,6 +60,12 @@ char *net_get(const char *url, const char *auth, long *status,
 	}
 
 	hdr = curl_slist_append(hdr, "Accept: application/json, */*");
+	hdr = curl_slist_append(hdr, "Accept-Language: en-US,en;q=0.9");
+	hdr = curl_slist_append(hdr, "Origin: https://soundcloud.com");
+	hdr = curl_slist_append(hdr, "Referer: https://soundcloud.com/");
+	hdr = curl_slist_append(hdr, "Sec-Fetch-Site: same-site");
+	hdr = curl_slist_append(hdr, "Sec-Fetch-Mode: cors");
+	hdr = curl_slist_append(hdr, "Sec-Fetch-Dest: empty");
 	if (auth) {
 		line = g_strdup_printf("Authorization: %s", auth);
 		hdr = curl_slist_append(hdr, line);
