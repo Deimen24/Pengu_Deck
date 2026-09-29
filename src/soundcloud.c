@@ -726,6 +726,114 @@ GPtrArray *sc_resolve(const char *link, GError **err)
 	return res;
 }
 
+/* One playlist object: its tracks, labelled with the playlist title. */
+static void add_playlist(GPtrArray *out, JsonObject *pl, GError **err)
+{
+	const char *title = str_member(pl, "title");
+	const char *urn = str_member(pl, "urn");
+	JsonArray *arr = arr_member(pl, "tracks");
+	GPtrArray *tracks = NULL;
+	guint i;
+
+	if (arr) {
+		tracks = g_ptr_array_new_with_free_func(g_object_unref);
+		for (i = 0; i < json_array_get_length(arr); i++)
+			add_track_node(tracks, json_array_get_element(arr, i));
+	} else if (urn) {
+		char *url = g_strdup_printf("%s/playlists/%s/tracks?%s"
+					    "&linked_partitioning=true",
+					    api_base(), urn, access_filter());
+
+		tracks = fetch_tracks(url, err);
+		g_free(url);
+	}
+	for (i = 0; tracks && i < tracks->len; i++) {
+		PdMediaItem *m = tracks->pdata[i];
+
+		if (full_only && m->preview)
+			continue;
+		if (title && *title) {
+			g_free(m->album);
+			m->album = g_strdup(title);
+		}
+		g_ptr_array_add(out, g_object_ref(m));
+	}
+	if (tracks)
+		g_ptr_array_unref(tracks);
+}
+
+/* Every playlist behind @first_url, page by page. */
+static void fetch_playlists(GPtrArray *out, const char *first_url,
+			    GError **err)
+{
+	char *url = g_strdup(first_url);
+	int pages = 0;
+
+	while (url && pages++ < 20) {
+		char *body = api_get(url, err);
+		JsonNode *root;
+		JsonArray *arr = NULL;
+		const char *next = NULL;
+		guint i;
+
+		g_free(url);
+		url = NULL;
+		if (!body)
+			return;
+		root = parse_json(body, err);
+		g_free(body);
+		if (!root)
+			return;
+		if (JSON_NODE_HOLDS_ARRAY(root))
+			arr = json_node_get_array(root);
+		else if (JSON_NODE_HOLDS_OBJECT(root))
+			arr = arr_member(json_node_get_object(root),
+					 "collection");
+		for (i = 0; arr && i < json_array_get_length(arr); i++) {
+			JsonNode *n = json_array_get_element(arr, i);
+
+			if (JSON_NODE_HOLDS_OBJECT(n))
+				add_playlist(out, json_node_get_object(n),
+					     NULL);
+		}
+		if (JSON_NODE_HOLDS_OBJECT(root))
+			next = str_member(json_node_get_object(root),
+					  "next_href");
+		url = next && *next ? g_strdup(next) : NULL;
+		json_node_unref(root);
+	}
+	g_free(url);
+}
+
+GPtrArray *sc_playlists(GError **err)
+{
+	GPtrArray *out;
+	char *url;
+
+	if (!sc_session_logged_in()) {
+		g_set_error_literal(err, SC_ERROR, SC_ERROR_NO_TOKEN,
+				    "Log in to SoundCloud to see your "
+				    "playlists.");
+		return NULL;
+	}
+	out = g_ptr_array_new_with_free_func(g_object_unref);
+	/* own playlists come with their tracks, liked ones are fetched */
+	url = g_strdup_printf("%s/me/playlists?show_tracks=true&limit=50"
+			      "&linked_partitioning=true", api_base());
+	fetch_playlists(out, url, err);
+	g_free(url);
+	if (out->len == 0 && err && *err) {
+		g_ptr_array_unref(out);
+		return NULL;
+	}
+	g_clear_error(err);
+	url = g_strdup_printf("%s/me/likes/playlists?limit=50"
+			      "&linked_partitioning=true", api_base());
+	fetch_playlists(out, url, NULL);
+	g_free(url);
+	return out;
+}
+
 GPtrArray *sc_likes(GError **err)
 {
 	if (!sc_session_logged_in()) {

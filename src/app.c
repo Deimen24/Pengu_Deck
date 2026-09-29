@@ -355,6 +355,8 @@ static void load_item(struct app *a, int idx, PdMediaItem *m)
 
 void app_load_item(struct app *a, int idx, PdMediaItem *m)
 {
+	if (idx >= 0)
+		a->by_hand[idx] = !a->automix_loading;
 	mark_played(a, m);
 	history_add(m);
 	load_item(a, idx, m);

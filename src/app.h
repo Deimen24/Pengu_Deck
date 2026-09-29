@@ -26,6 +26,8 @@ struct app {
 	GListStore *queue;		/* PdMediaItem, automix order */
 	GHashTable *played;		/* keys of tracks loaded this session */
 	gboolean loading[ENGINE_DECKS];	/* stream url being resolved */
+	gboolean by_hand[ENGINE_DECKS];	/* loaded by the user, not automix */
+	gboolean automix_loading;	/* app_load_item() called by automix */
 	gboolean preview_loading;
 	char *preview_key;		/* item on the preview deck */
 

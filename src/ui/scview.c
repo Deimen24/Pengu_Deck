@@ -18,6 +18,7 @@ struct _PdScView {
 	GtkWidget *entry;
 	GtkWidget *spinner;
 	GtkWidget *likes;
+	GtkWidget *playlists;
 	GtkWidget *login;
 	GtkWidget *full;
 	GtkWidget *hint;
@@ -32,6 +33,7 @@ enum query_kind {
 	QUERY_SEARCH,
 	QUERY_RESOLVE,
 	QUERY_LIKES,
+	QUERY_PLAYLISTS,
 };
 
 struct query {
@@ -88,6 +90,9 @@ static gpointer query_thread(gpointer data)
 	case QUERY_LIKES:
 		q->result = sc_likes(&q->err);
 		break;
+	case QUERY_PLAYLISTS:
+		q->result = sc_playlists(&q->err);
+		break;
 	}
 	g_idle_add(query_done, q);
 	return NULL;
@@ -127,6 +132,11 @@ static void on_likes(GtkButton *b, PdScView *v)
 	run_query(v, QUERY_LIKES, NULL);
 }
 
+static void on_playlists(GtkButton *b, PdScView *v)
+{
+	run_query(v, QUERY_PLAYLISTS, NULL);
+}
+
 /* Full tracks only: rerun the current search under the new filter. */
 static void on_full(GtkToggleButton *b, PdScView *v)
 {
@@ -163,6 +173,7 @@ static void update_login(PdScView *v)
 	gtk_button_set_label(GTK_BUTTON(v->login), in ? "Log out" :
 			     "Log in to SoundCloud");
 	gtk_widget_set_visible(v->likes, in);
+	gtk_widget_set_visible(v->playlists, in);
 	if (in)
 		gtk_widget_add_css_class(v->login, "logged-in");
 	else
@@ -189,7 +200,8 @@ GtkWidget *pd_sc_view_new(struct app *app)
 	media = pd_media_view_new(app, app->sc_results,
 				  "Search SoundCloud above, or paste a "
 				  "track, playlist or artist link and press "
-				  "Enter.\n\nLog in to load your likes.");
+				  "Enter.\n\nLog in to load your likes and "
+				  "playlists.");
 	v->media = PD_MEDIA_VIEW(media);
 
 	v->entry = gtk_entry_new();
@@ -228,6 +240,14 @@ GtkWidget *pd_sc_view_new(struct app *app)
 	gtk_widget_set_focusable(v->likes, FALSE);
 	g_signal_connect(v->likes, "clicked", G_CALLBACK(on_likes), v);
 	gtk_box_append(GTK_BOX(bar), v->likes);
+	v->playlists = gtk_button_new_with_label("Playlists");
+	gtk_widget_set_tooltip_text(v->playlists, "Load the tracks of all "
+				    "your playlists (own and liked); the "
+				    "playlist name shows as album, so the "
+				    "filter below searches across them");
+	gtk_widget_set_focusable(v->playlists, FALSE);
+	g_signal_connect(v->playlists, "clicked", G_CALLBACK(on_playlists), v);
+	gtk_box_append(GTK_BOX(bar), v->playlists);
 
 	v->spinner = gtk_spinner_new();
 	gtk_spinner_set_spinning(GTK_SPINNER(v->spinner), TRUE);

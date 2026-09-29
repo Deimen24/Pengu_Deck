@@ -103,6 +103,7 @@ void config_load(struct config *c)
 	c->sc_user = get_int(kf, "soundcloud", "user", 0);
 	c->sc_full_only = get_int(kf, "soundcloud", "full_only", 0);
 
+	c->ui_split = get_int(kf, "ui", "split", 0);
 	c->ndecks = get_int(kf, "decks", "count", 2);
 	c->pitch_range = get_int(kf, "decks", "pitch_range", 8);
 	c->keylock = get_int(kf, "decks", "keylock", 0);
@@ -112,6 +113,7 @@ void config_load(struct config *c)
 	c->automix_fade = CLAMP(get_int(kf, "automix", "fade", 12), 2, 90);
 	c->automix_sync = get_int(kf, "automix", "sync", 1);
 	c->automix_auto = get_int(kf, "automix", "auto", 1);
+	c->automix_smart = get_int(kf, "automix", "smart", 1);
 	for (i = 0; i < 8; i++) {
 		char name[8];
 
@@ -180,6 +182,7 @@ void config_save(const struct config *c)
 	g_key_file_set_integer(kf, "soundcloud", "full_only",
 			       c->sc_full_only);
 
+	g_key_file_set_integer(kf, "ui", "split", c->ui_split);
 	g_key_file_set_integer(kf, "decks", "count", c->ndecks);
 	g_key_file_set_integer(kf, "decks", "pitch_range", c->pitch_range);
 	g_key_file_set_integer(kf, "decks", "keylock", c->keylock);
@@ -189,6 +192,7 @@ void config_save(const struct config *c)
 	g_key_file_set_integer(kf, "automix", "fade", c->automix_fade);
 	g_key_file_set_integer(kf, "automix", "sync", c->automix_sync);
 	g_key_file_set_integer(kf, "automix", "auto", c->automix_auto);
+	g_key_file_set_integer(kf, "automix", "smart", c->automix_smart);
 	for (i = 0; i < 8; i++) {
 		char name[8];
 

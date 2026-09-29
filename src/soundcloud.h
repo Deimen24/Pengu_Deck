@@ -80,6 +80,8 @@ void sc_set_full_only(gboolean on);
 GPtrArray *sc_search(const char *query, GError **err);
 GPtrArray *sc_resolve(const char *url, GError **err);
 GPtrArray *sc_likes(GError **err);
+/* Tracks of all the user's own and liked playlists, album = playlist. */
+GPtrArray *sc_playlists(GError **err);
 
 /* Returns a URL FFmpeg can open (progressive MP3 or an HLS playlist). */
 char *sc_stream_url(PdMediaItem *item, GError **err);

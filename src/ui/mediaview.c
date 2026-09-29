@@ -21,7 +21,7 @@ struct _PdMediaView {
 	GListStore *store;
 	GtkFilterListModel *filtered;
 	GtkSortListModel *sorted;
-	GtkSingleSelection *selection;
+	GtkMultiSelection *selection;
 	GtkWidget *view;
 	GtkWidget *search;
 	GtkWidget *count;
@@ -230,8 +230,11 @@ static void on_cell_right_click(GtkGestureClick *g, int n, double x,
 	PdMediaView *v = g_object_get_data(G_OBJECT(g), "view");
 	guint pos = gtk_list_item_get_position(li);
 
-	if (pos != GTK_INVALID_LIST_POSITION)
-		gtk_single_selection_set_selected(v->selection, pos);
+	if (pos != GTK_INVALID_LIST_POSITION &&
+	    !gtk_selection_model_is_selected(GTK_SELECTION_MODEL(v->selection),
+					     pos))
+		gtk_selection_model_select_item(
+				GTK_SELECTION_MODEL(v->selection), pos, TRUE);
 }
 
 static void setup_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
@@ -413,9 +416,36 @@ static void add_column(PdMediaView *v, const char *title, enum column col,
 
 /* ---- loading ----------------------------------------------------- */
 
+/* Every selected item, in list order; the array holds references. */
+static GPtrArray *selected_all(PdMediaView *v)
+{
+	GtkSelectionModel *sel = GTK_SELECTION_MODEL(v->selection);
+	GtkBitset *set = gtk_selection_model_get_selection(sel);
+	GPtrArray *out = g_ptr_array_new_with_free_func(g_object_unref);
+	GtkBitsetIter it;
+	guint pos;
+
+	if (gtk_bitset_iter_init_first(&it, set, &pos)) {
+		do {
+			PdMediaItem *m = g_list_model_get_item(
+						G_LIST_MODEL(sel), pos);
+
+			if (m)
+				g_ptr_array_add(out, m);
+		} while (gtk_bitset_iter_next(&it, &pos));
+	}
+	gtk_bitset_unref(set);
+	return out;
+}
+
+/* The first selected item, borrowed, NULL when nothing is selected. */
 static PdMediaItem *selected(PdMediaView *v)
 {
-	return gtk_single_selection_get_selected_item(v->selection);
+	GPtrArray *all = selected_all(v);
+	PdMediaItem *m = all->len ? all->pdata[0] : NULL;
+
+	g_ptr_array_unref(all);
+	return m;
 }
 
 /* Prefer an empty visible deck, then a paused one, then deck A. */
@@ -453,12 +483,17 @@ void pd_media_view_load_selected(PdMediaView *v, int idx)
 
 void pd_media_view_queue_selected(PdMediaView *v)
 {
-	PdMediaItem *m = selected(v);
+	GPtrArray *all = selected_all(v);
+	guint i;
 
-	if (!m)
-		return;
-	g_list_store_append(v->app->queue, m);
-	app_toast(v->app, "Queued \"%s\"", m->title);
+	for (i = 0; i < all->len; i++)
+		g_list_store_append(v->app->queue, all->pdata[i]);
+	if (all->len == 1)
+		app_toast(v->app, "Queued \"%s\"",
+			  ((PdMediaItem *)all->pdata[0])->title);
+	else if (all->len > 1)
+		app_toast(v->app, "Queued %u tracks", all->len);
+	g_ptr_array_unref(all);
 }
 
 static void on_load_deck(GSimpleAction *a, GVariant *p, gpointer data)
@@ -482,23 +517,28 @@ static void on_preview(GSimpleAction *a, GVariant *p, gpointer data)
 
 static void on_cache(GSimpleAction *a, GVariant *p, gpointer data)
 {
-	PdMediaItem *m = selected(data);
+	GPtrArray *all = selected_all(data);
+	guint i;
 
-	if (m)
-		sccache_fetch(m);
+	for (i = 0; i < all->len; i++)
+		sccache_fetch(all->pdata[i]);
+	g_ptr_array_unref(all);
 }
 
 static void on_add_to_playlist(GSimpleAction *a, GVariant *p, gpointer data)
 {
 	PdMediaView *v = data;
-	PdMediaItem *m = selected(v);
+	GPtrArray *all = selected_all(v);
 	const char *name = g_variant_get_string(p, NULL);
 	struct playlist *pl = playlists_find(name);
+	guint i;
 
-	if (m && pl) {
-		playlists_add(pl, m);
-		app_toast(v->app, "Added to \"%s\"", name);
-	}
+	for (i = 0; pl && i < all->len; i++)
+		playlists_add(pl, all->pdata[i]);
+	if (pl && all->len)
+		app_toast(v->app, "Added %u track%s to \"%s\"", all->len,
+			  all->len == 1 ? "" : "s", name);
+	g_ptr_array_unref(all);
 }
 
 static void on_remove_from_playlist(GSimpleAction *a, GVariant *p,
@@ -542,8 +582,9 @@ GtkWidget *pd_media_view_queue_button(PdMediaView *v)
 
 	gtk_widget_add_css_class(b, "queue-button");
 	gtk_widget_set_focusable(b, FALSE);
-	gtk_widget_set_tooltip_text(b, "Add the selected track to the "
-				    "automix queue");
+	gtk_widget_set_tooltip_text(b, "Add the selected tracks to the "
+				    "automix queue (Ctrl or Shift click "
+				    "selects several)");
 	g_signal_connect_swapped(b, "clicked",
 				 G_CALLBACK(pd_media_view_queue_selected), v);
 	return b;
@@ -643,10 +684,10 @@ static void on_search(GtkEditable *e, PdMediaView *v)
 	pd_media_view_set_filter(v, gtk_editable_get_text(e));
 }
 
-static void on_selected(GObject *sel, GParamSpec *ps, PdMediaView *v)
+static void on_selected(GtkSelectionModel *sel, guint pos, guint n,
+			PdMediaView *v)
 {
-	PdMediaItem *m = gtk_single_selection_get_selected_item(
-					GTK_SINGLE_SELECTION(sel));
+	PdMediaItem *m = selected(v);
 
 	if (!m)
 		return;
@@ -656,15 +697,18 @@ static void on_selected(GObject *sel, GParamSpec *ps, PdMediaView *v)
 
 /*
  * Refreshing a row (played mark, cache state) re-emits its item, which
- * makes the single selection drop it; put it back when it is still in
- * the changed range.
+ * makes the selection drop it; put it back when it is still in the
+ * changed range and nothing else is selected.
  */
 static void reselect(PdMediaView *v, GListModel *m, guint pos, guint add)
 {
+	GtkBitset *set = gtk_selection_model_get_selection(
+				GTK_SELECTION_MODEL(v->selection));
+	gboolean empty = gtk_bitset_is_empty(set);
 	guint i;
 
-	if (!v->sel_key || gtk_single_selection_get_selected(v->selection) !=
-	    GTK_INVALID_LIST_POSITION)
+	gtk_bitset_unref(set);
+	if (!v->sel_key || !empty)
 		return;
 	for (i = pos; i < pos + add; i++) {
 		PdMediaItem *x = g_list_model_get_item(m, i);
@@ -672,7 +716,8 @@ static void reselect(PdMediaView *v, GListModel *m, guint pos, guint add)
 
 		g_clear_object(&x);
 		if (hit) {
-			gtk_single_selection_set_selected(v->selection, i);
+			gtk_selection_model_select_item(
+				GTK_SELECTION_MODEL(v->selection), i, TRUE);
 			return;
 		}
 	}
@@ -751,8 +796,7 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 	v->sorted = gtk_sort_list_model_new(G_LIST_MODEL(v->filtered),
 			g_object_ref(gtk_column_view_get_sorter(
 					GTK_COLUMN_VIEW(v->view))));
-	v->selection = gtk_single_selection_new(G_LIST_MODEL(v->sorted));
-	gtk_single_selection_set_autoselect(v->selection, FALSE);
+	v->selection = gtk_multi_selection_new(G_LIST_MODEL(v->sorted));
 	gtk_column_view_set_model(GTK_COLUMN_VIEW(v->view),
 				  GTK_SELECTION_MODEL(v->selection));
 	gtk_column_view_set_single_click_activate(GTK_COLUMN_VIEW(v->view),
@@ -827,7 +871,7 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 	gtk_box_append(GTK_BOX(v), v->count);
 	g_signal_connect(v->selection, "items-changed",
 			 G_CALLBACK(on_items_changed), v);
-	g_signal_connect(v->selection, "notify::selected-item",
+	g_signal_connect(v->selection, "selection-changed",
 			 G_CALLBACK(on_selected), v);
 	on_items_changed(G_LIST_MODEL(v->selection), 0, 0, 0, v);
 	return GTK_WIDGET(v);
@@ -866,13 +910,12 @@ void pd_media_view_set_store(PdMediaView *v, GListStore *store,
 	v->sorted = gtk_sort_list_model_new(G_LIST_MODEL(v->filtered),
 			g_object_ref(gtk_column_view_get_sorter(
 					GTK_COLUMN_VIEW(v->view))));
-	v->selection = gtk_single_selection_new(G_LIST_MODEL(v->sorted));
-	gtk_single_selection_set_autoselect(v->selection, FALSE);
+	v->selection = gtk_multi_selection_new(G_LIST_MODEL(v->sorted));
 	gtk_column_view_set_model(GTK_COLUMN_VIEW(v->view),
 				  GTK_SELECTION_MODEL(v->selection));
 	g_signal_connect(v->selection, "items-changed",
 			 G_CALLBACK(on_items_changed), v);
-	g_signal_connect(v->selection, "notify::selected-item",
+	g_signal_connect(v->selection, "selection-changed",
 			 G_CALLBACK(on_selected), v);
 	on_items_changed(G_LIST_MODEL(v->selection), 0, 0, 0, v);
 }

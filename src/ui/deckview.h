@@ -20,6 +20,13 @@ GtkWidget *pd_deck_view_new(struct app *app, int idx);
 void pd_deck_view_action(PdDeckView *v, const char *action, gboolean press);
 void pd_deck_view_apply_config(PdDeckView *v);
 
+/*
+ * Compact levels drop features as the deck area gets smaller: 0 shows
+ * everything, PD_COMPACT_MAX keeps only the header and transport.
+ */
+#define PD_COMPACT_MAX	4
+void pd_deck_view_set_compact(PdDeckView *v, int level);
+
 G_END_DECLS
 
 #endif /* PD_UI_DECKVIEW_H */

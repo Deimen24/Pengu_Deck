@@ -40,10 +40,14 @@ struct config {
 	gboolean quantize;
 	gboolean autogain;
 
+	/* window */
+	int ui_split;		/* height of the deck area, 0 = natural */
+
 	/* automix */
 	int automix_fade;	/* seconds, or the base length when auto */
 	gboolean automix_sync;
 	gboolean automix_auto;	/* size transitions from the tracks */
+	gboolean automix_smart;	/* pick the best matching queued track */
 
 	/* sampler */
 	char *samples[8];

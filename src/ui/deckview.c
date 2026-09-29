@@ -42,6 +42,13 @@ struct _PdDeckView {
 	GtkWidget *hotcue[DECK_HOTCUES];
 	GtkWidget *pitch;
 	GtkWidget *pitch_label;
+	GtkWidget *pitch_box;
+	GtkWidget *platter;
+	GtkWidget *transport_row;
+	GtkWidget *modes_row;
+	GtkWidget *hotcue_row;
+	GtkWidget *loop_row;
+	int compact;
 
 	guint tick;
 	struct track *saved_for;	/* track whose analysis was saved */
@@ -1002,21 +1009,26 @@ GtkWidget *pd_deck_view_new(struct app *app, int idx)
 		GtkWidget *bottom = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
 		GtkWidget *pads = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
 
-		gtk_box_append(GTK_BOX(pads), build_transport(v));
-		gtk_box_append(GTK_BOX(pads), build_modes(v));
-		gtk_box_append(GTK_BOX(pads), build_hotcues(v));
-		gtk_box_append(GTK_BOX(pads), build_loops(v));
+		v->transport_row = build_transport(v);
+		v->modes_row = build_modes(v);
+		v->hotcue_row = build_hotcues(v);
+		v->loop_row = build_loops(v);
+		gtk_box_append(GTK_BOX(pads), v->transport_row);
+		gtk_box_append(GTK_BOX(pads), v->modes_row);
+		gtk_box_append(GTK_BOX(pads), v->hotcue_row);
+		gtk_box_append(GTK_BOX(pads), v->loop_row);
 		gtk_widget_set_valign(pads, GTK_ALIGN_CENTER);
-		gtk_box_append(GTK_BOX(bottom),
-			       pd_platter_new(v->deck, app_deck_color(idx),
-					      PLATTER_SIZE));
+		v->platter = pd_platter_new(v->deck, app_deck_color(idx),
+					    PLATTER_SIZE);
+		gtk_box_append(GTK_BOX(bottom), v->platter);
 		gtk_box_append(GTK_BOX(bottom), pads);
 		gtk_box_append(GTK_BOX(main), bottom);
 	}
 
 	gtk_widget_set_hexpand(main, TRUE);
 	gtk_box_append(GTK_BOX(v), main);
-	gtk_box_append(GTK_BOX(v), build_pitch(v));
+	v->pitch_box = build_pitch(v);
+	gtk_box_append(GTK_BOX(v), v->pitch_box);
 
 	drop = gtk_drop_target_new(G_TYPE_INVALID, GDK_ACTION_COPY);
 	gtk_drop_target_set_gtypes(drop, types, G_N_ELEMENTS(types));
@@ -1042,6 +1054,22 @@ void pd_deck_view_apply_config(PdDeckView *v)
 	gtk_range_set_value(GTK_RANGE(v->pitch), CLAMP(cur, -range, range));
 	gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(v->keylock),
 				     atomic_load(&v->deck->keylock));
+}
+
+void pd_deck_view_set_compact(PdDeckView *v, int level)
+{
+	level = CLAMP(level, 0, PD_COMPACT_MAX);
+	if (level == v->compact)
+		return;
+	v->compact = level;
+	gtk_widget_set_visible(v->loop_row, level < 1);
+	gtk_widget_set_visible(v->hotcue_row, level < 2);
+	gtk_widget_set_visible(v->overview, level < 2);
+	gtk_widget_set_visible(v->platter, level < 2);
+	gtk_widget_set_visible(v->modes_row, level < 3);
+	gtk_widget_set_visible(v->pitch_box, level < 3);
+	gtk_widget_set_visible(v->status, level < 3);
+	gtk_widget_set_visible(v->wave, level < 4);
 }
 
 void pd_deck_view_action(PdDeckView *v, const char *action, gboolean press)

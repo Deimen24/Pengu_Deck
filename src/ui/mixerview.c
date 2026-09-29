@@ -27,6 +27,16 @@ struct _PdMixerView {
 	GPtrArray *knobs;		/* PdKnob, target in "target" data */
 	guint tick;
 	gboolean updating;
+
+	/* hidden step by step as the mixer gets less room */
+	GtkWidget *fx[ENGINE_DECKS];
+	GtkWidget *filter[ENGINE_DECKS];
+	GtkWidget *xf_side[ENGINE_DECKS];
+	GtkWidget *strip_knobs[ENGINE_DECKS];
+	GtkWidget *master_knobs;
+	GtkWidget *cue_box;
+	GtkWidget *mic_box;
+	int compact;
 };
 
 G_DEFINE_FINAL_TYPE(PdMixerView, pd_mixer_view, GTK_TYPE_BOX)
@@ -417,7 +427,10 @@ static GtkWidget *build_strip(PdMixerView *v, int i)
 	gtk_widget_set_tooltip_text(k, "Left: low pass, right: high pass");
 	track_knob(v, k);
 	gtk_box_append(GTK_BOX(knobs), k);
-	gtk_box_append(GTK_BOX(knobs), build_fx(v, d));
+	v->filter[i] = k;
+	v->fx[i] = build_fx(v, d);
+	gtk_box_append(GTK_BOX(knobs), v->fx[i]);
+	v->strip_knobs[i] = knobs;
 
 	b = gtk_button_new_with_label(i % 2 ? "XF B" : "XF A");
 	gtk_widget_add_css_class(b, "xf-side");
@@ -426,6 +439,7 @@ static GtkWidget *build_strip(PdMixerView *v, int i)
 				    "B side");
 	g_signal_connect(b, "clicked", G_CALLBACK(on_xf_side), &d->xf_side);
 	gtk_box_append(GTK_BOX(knobs), b);
+	v->xf_side[i] = b;
 
 	v->pfl[i] = gtk_toggle_button_new_with_label("🎧");
 	gtk_widget_set_focusable(v->pfl[i], FALSE);
@@ -482,16 +496,18 @@ static GtkWidget *build_master(PdMixerView *v)
 	track_knob(v, k);
 	gtk_box_append(GTK_BOX(knobs), k);
 
-	gtk_box_append(GTK_BOX(knobs), section_label("CUE"));
+	v->cue_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+	gtk_box_append(GTK_BOX(v->cue_box), section_label("CUE"));
 	k = knob_for("MIX", 0.0, 1.0, 0.0, &e->cue_mix, "#4dd0e1");
 	gtk_widget_set_tooltip_text(k, "Headphone mix: cue ↔ master");
 	pd_knob_set_detent(PD_KNOB(k), FALSE);
 	track_knob(v, k);
-	gtk_box_append(GTK_BOX(knobs), k);
+	gtk_box_append(GTK_BOX(v->cue_box), k);
 	k = knob_for("VOL", 0.0, 1.5, 1.0, &e->cue_vol, "#4dd0e1");
 	pd_knob_set_detent(PD_KNOB(k), FALSE);
 	track_knob(v, k);
-	gtk_box_append(GTK_BOX(knobs), k);
+	gtk_box_append(GTK_BOX(v->cue_box), k);
+	gtk_box_append(GTK_BOX(knobs), v->cue_box);
 
 	v->record = gtk_toggle_button_new();
 	v->record_label = gtk_label_new("REC");
@@ -515,17 +531,20 @@ static GtkWidget *build_master(PdMixerView *v)
 	g_signal_connect(v->live, "toggled", G_CALLBACK(on_live), v);
 	gtk_box_append(GTK_BOX(knobs), v->live);
 
-	gtk_box_append(GTK_BOX(knobs), section_label("MIC"));
+	v->mic_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 2);
+	gtk_box_append(GTK_BOX(v->mic_box), section_label("MIC"));
 	k = knob_for("GAIN", -20.0, 20.0, 0.0, &e->mic_gain, "#a3e635");
 	track_knob(v, k);
-	gtk_box_append(GTK_BOX(knobs), k);
+	gtk_box_append(GTK_BOX(v->mic_box), k);
 	v->mic = gtk_toggle_button_new_with_label("MIC");
 	gtk_widget_add_css_class(v->mic, "mic");
 	gtk_widget_set_focusable(v->mic, FALSE);
 	gtk_widget_set_tooltip_text(v->mic, "Microphone on: talkover ducks "
 				    "the music while you speak");
 	g_signal_connect(v->mic, "toggled", G_CALLBACK(on_mic), v);
-	gtk_box_append(GTK_BOX(knobs), v->mic);
+	gtk_box_append(GTK_BOX(v->mic_box), v->mic);
+	gtk_box_append(GTK_BOX(knobs), v->mic_box);
+	v->master_knobs = knobs;
 
 	v->master_meter = pd_meter_new();
 	gtk_widget_set_margin_top(v->master_meter, 12);
@@ -630,6 +649,26 @@ void pd_mixer_view_set_decks(PdMixerView *v, int n)
 
 	for (i = 0; i < ENGINE_DECKS; i++)
 		gtk_widget_set_visible(v->strip[i], i < n);
+}
+
+void pd_mixer_view_set_compact(PdMixerView *v, int level)
+{
+	int i;
+
+	level = CLAMP(level, 0, 4);
+	if (level == v->compact)
+		return;
+	v->compact = level;
+	for (i = 0; i < ENGINE_DECKS; i++) {
+		gtk_widget_set_visible(v->fx[i], level < 1);
+		gtk_widget_set_visible(v->filter[i], level < 2);
+		gtk_widget_set_visible(v->xf_side[i], level < 2);
+		gtk_widget_set_visible(v->pfl[i], level < 2);
+		gtk_widget_set_visible(v->strip_knobs[i], level < 3);
+	}
+	gtk_widget_set_visible(v->mic_box, level < 1);
+	gtk_widget_set_visible(v->cue_box, level < 2);
+	gtk_widget_set_visible(v->master_knobs, level < 3);
 }
 
 void pd_mixer_view_apply_config(PdMixerView *v)

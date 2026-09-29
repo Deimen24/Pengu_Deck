@@ -2,6 +2,8 @@
 /*
  * window.c - main window: decks on top, mixer between them, library below
  */
+#define G_LOG_DOMAIN "pengu-deck"
+
 #include "deckview.h"
 #include "libview.h"
 #include "mixerview.h"
@@ -35,6 +37,13 @@ struct _PdWindow {
 	guint inhibit_timer;
 	guint inhibit_cookie;	/* session sleep/idle inhibit, 0 = none */
 	int next_deck;
+	GtkWidget *top;		/* decks and mixer */
+	GtkWidget *paned;
+	guint fit_tick;
+	int fit_w, fit_h;	/* size the compact level was chosen for */
+	int saved_split;	/* from the config, applied on the first frame */
+	gboolean fitted;
+	guint split_save;
 };
 
 G_DEFINE_FINAL_TYPE(PdWindow, pd_window, GTK_TYPE_APPLICATION_WINDOW)
@@ -547,9 +556,120 @@ static GtkWidget *build_header(PdWindow *w)
 	return hb;
 }
 
+/* ---- fit the decks into the room above the library ---------------- */
+
+static void set_compact(PdWindow *w, int level)
+{
+	int i;
+
+	for (i = 0; i < ENGINE_DECKS; i++)
+		pd_deck_view_set_compact(PD_DECK_VIEW(w->deck[i]), level);
+	pd_mixer_view_set_compact(PD_MIXER_VIEW(w->mixer), level);
+}
+
+/*
+ * The library pane can be dragged over the deck area.  Whenever that
+ * area changes size, pick the least compact level whose minimum still
+ * fits, so features disappear one row at a time instead of the decks
+ * being cut off.
+ */
+static void on_split(GObject *paned, GParamSpec *ps, PdWindow *w);
+
+static gboolean fit_tick(GtkWidget *widget, GdkFrameClock *clock,
+			 gpointer data)
+{
+	PdWindow *w = data;
+	int h = gtk_widget_get_height(w->top);
+	int wd = gtk_widget_get_width(w->top);
+	int level, min_h, min_w;
+
+	if (h <= 0 || wd <= 0)
+		return G_SOURCE_CONTINUE;
+	if (!w->fitted) {
+		/*
+		 * First frame: the saved split, else the decks' natural
+		 * height.  Only from now on is a position change the
+		 * user's, worth saving.
+		 */
+		int pos = w->saved_split;
+
+		w->fitted = TRUE;
+		if (pos <= 0) {
+			set_compact(w, 0);
+			gtk_widget_measure(w->top, GTK_ORIENTATION_VERTICAL,
+					   wd, NULL, &pos, NULL, NULL);
+			pos += gtk_widget_get_margin_top(w->top) +
+			       gtk_widget_get_margin_bottom(w->top);
+		}
+		gtk_paned_set_position(GTK_PANED(w->paned), pos);
+		w->app->cfg.ui_split = pos;
+		g_signal_connect(w->paned, "notify::position",
+				 G_CALLBACK(on_split), w);
+		return G_SOURCE_CONTINUE;
+	}
+	/*
+	 * A shrunk start child is allocated its minimum and clipped, so
+	 * its own height does not tell: the room is the split position,
+	 * or what the library leaves when the window is short.
+	 */
+	{
+		int end_min, paned_h = gtk_widget_get_height(w->paned);
+
+		gtk_widget_measure(w->notebook, GTK_ORIENTATION_VERTICAL, -1,
+				   &end_min, NULL, NULL, NULL);
+		h = MIN(gtk_paned_get_position(GTK_PANED(w->paned)),
+			paned_h - end_min - 4);
+	}
+	wd += gtk_widget_get_margin_start(w->top) +
+	      gtk_widget_get_margin_end(w->top);
+	if (h == w->fit_h && wd == w->fit_w)
+		return G_SOURCE_CONTINUE;
+	w->fit_h = h;
+	w->fit_w = wd;
+	for (level = 0; level <= PD_COMPACT_MAX; level++) {
+		set_compact(w, level);
+		gtk_widget_measure(w->top, GTK_ORIENTATION_HORIZONTAL, -1,
+				   &min_w, NULL, NULL, NULL);
+		gtk_widget_measure(w->top, GTK_ORIENTATION_VERTICAL, -1,
+				   &min_h, NULL, NULL, NULL);
+		if (min_h <= h && min_w <= wd)
+			break;
+	}
+	g_debug("fit: %dx%d -> level %d (min %dx%d)", wd, h, level, min_w,
+		min_h);
+	return G_SOURCE_CONTINUE;
+}
+
+static gboolean save_split(gpointer data)
+{
+	PdWindow *w = data;
+
+	w->split_save = 0;
+	config_save(&w->app->cfg);
+	return G_SOURCE_REMOVE;
+}
+
+/* Remember the split; written out once the drag has settled. */
+static void on_split(GObject *paned, GParamSpec *ps, PdWindow *w)
+{
+	w->app->cfg.ui_split = gtk_paned_get_position(GTK_PANED(paned));
+	if (w->split_save)
+		g_source_remove(w->split_save);
+	w->split_save = g_timeout_add_seconds(2, save_split, w);
+}
+
 static void pd_window_dispose(GObject *obj)
 {
 	PdWindow *w = PD_WINDOW(obj);
+
+	if (w->fit_tick) {
+		gtk_widget_remove_tick_callback(GTK_WIDGET(w), w->fit_tick);
+		w->fit_tick = 0;
+	}
+	if (w->split_save) {
+		g_source_remove(w->split_save);
+		w->split_save = 0;
+	}
 
 	if (w->toast_id) {
 		g_source_remove(w->toast_id);
@@ -609,7 +729,7 @@ GtkWidget *pd_window_new(struct app *app)
 	app->ui_data = w;
 	gtk_window_set_title(GTK_WINDOW(w), "Pengu Deck");
 	w->inhibit_timer = g_timeout_add(INHIBIT_POLL_MS, inhibit_tick, w);
-	gtk_window_set_default_size(GTK_WINDOW(w), 1440, 900);
+	gtk_window_set_default_size(GTK_WINDOW(w), 1600, 960);
 	gtk_window_set_icon_name(GTK_WINDOW(w), PD_APP_ID);
 	gtk_window_set_titlebar(GTK_WINDOW(w), build_header(w));
 	g_action_map_add_action_entries(G_ACTION_MAP(w), entries,
@@ -652,10 +772,16 @@ GtkWidget *pd_window_new(struct app *app)
 	gtk_paned_set_start_child(GTK_PANED(paned), top);
 	gtk_paned_set_end_child(GTK_PANED(paned), w->notebook);
 	gtk_paned_set_resize_start_child(GTK_PANED(paned), FALSE);
-	gtk_paned_set_shrink_start_child(GTK_PANED(paned), FALSE);
+	/* the deck area may be dragged smaller: fit_tick() compacts it */
+	gtk_paned_set_shrink_start_child(GTK_PANED(paned), TRUE);
 	gtk_paned_set_shrink_end_child(GTK_PANED(paned), FALSE);
 	gtk_widget_set_vexpand(paned, TRUE);
 	gtk_box_append(GTK_BOX(root), paned);
+	w->top = top;
+	w->paned = paned;
+	w->saved_split = app->cfg.ui_split;
+	w->fit_tick = gtk_widget_add_tick_callback(GTK_WIDGET(w), fit_tick, w,
+						   NULL);
 
 	w->toast_label = gtk_label_new("");
 	gtk_label_set_wrap(GTK_LABEL(w->toast_label), TRUE);

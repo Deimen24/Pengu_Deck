@@ -136,6 +136,12 @@ static void on_auto(GtkCheckButton *c, PdQueueView *v)
 	config_save(&v->app->cfg);
 }
 
+static void on_smart(GtkCheckButton *c, PdQueueView *v)
+{
+	v->app->cfg.automix_smart = gtk_check_button_get_active(c);
+	config_save(&v->app->cfg);
+}
+
 static void on_sync(GtkCheckButton *c, PdQueueView *v)
 {
 	v->app->cfg.automix_sync = gtk_check_button_get_active(c);
@@ -247,12 +253,25 @@ GtkWidget *pd_queue_view_new(struct app *app)
 	gtk_check_button_set_active(GTK_CHECK_BUTTON(check),
 				    app->cfg.automix_auto);
 	gtk_widget_set_tooltip_text(check, "Size each transition from the "
-				    "tracks: long beat matched blends when "
-				    "the tempos fit, the whole outro when a "
-				    "track winds down, short cuts otherwise; "
-				    "the seconds above are the minimum");
+				    "two tracks (3 to 45 s): a 32 beat blend "
+				    "when the tempos match, longer to cover "
+				    "a quiet outro or intro, a short cut "
+				    "when they cannot be matched; the "
+				    "seconds above are the minimum");
 	gtk_widget_set_margin_start(check, 12);
 	g_signal_connect(check, "toggled", G_CALLBACK(on_auto), v);
+	gtk_box_append(GTK_BOX(bar), check);
+
+	check = gtk_check_button_new_with_label("Smart order");
+	gtk_check_button_set_active(GTK_CHECK_BUTTON(check),
+				    app->cfg.automix_smart);
+	gtk_widget_set_tooltip_text(check, "Play the queued track that "
+				    "best follows the current one: closest "
+				    "tempo within the pitch range, then the "
+				    "closest key on the Camelot wheel; off "
+				    "plays the queue in order");
+	gtk_widget_set_margin_start(check, 12);
+	g_signal_connect(check, "toggled", G_CALLBACK(on_smart), v);
 	gtk_box_append(GTK_BOX(bar), check);
 
 	check = gtk_check_button_new_with_label("Sync tempo");

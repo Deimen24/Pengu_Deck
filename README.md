@@ -90,25 +90,42 @@ meson setup build && meson compile -C build && meson test -C build
 ./build/pengu-deck [file ...]
 ```
 
+## Layout
+
+Drag the divider above the Library tabs to give the library more room.
+The decks and the mixer shrink to fit: loop controls go first, then hot
+cues, overview and platter, then modes and pitch, then the waveform,
+until only title and transport remain. Drag it back down and everything
+returns. The split is remembered.
+
 ## Automix
 
 Queue tracks from the Library or SoundCloud tab (**+ Queue**, context
-menu or drag and drop) and press **AUTOMIX**. The queue alternates
-between decks A and B: the next track is loaded early, started at its
-cue point, tempo matched when the pitch range allows it, and the
-crossfader glides over. Everything stays hands on during a transition;
-**Next ⏭** mixes right away.
+menu or drag and drop; Ctrl or Shift click selects several) and press
+**AUTOMIX**. The queue alternates between decks A and B: as soon as a
+deck is free the next track is loaded into it, so it is decoded and
+analysed long before it is due. It starts at its cue point, tempo
+matched when the pitch range allows it, and the crossfader glides over.
+Everything stays hands on during a transition; **Next ⏭** mixes right
+away. A track you load into the free deck yourself is played next
+instead of the queue, and a deck you already started is never restarted.
+
+With **Smart order** on (default) the queue is not played top to bottom:
+the track that best follows the current one is picked, by the pitch
+needed to match the tempo (half and double time count) and then by the
+distance on the Camelot wheel. Off, the queue plays in order.
 
 With **Auto length** on (default) each transition is planned from the
-two tracks:
+two tracks, so every mix has its own length:
 
-- matched tempos: a beat aligned blend of at least 16 beats
+- matched tempos: a beat aligned blend of at least 32 beats
 - a quiet outro stretches the blend to cover it, up to 30 s
+- a quiet intro up to 32 s is blended over so the first drop lands as
+  the fade ends; a longer one is skipped
 - tempos too far apart to sync: a cut within 8 s
-- a long quiet intro is skipped when the track has no cue point
 
 The length is clamped to 3–45 s and to what is left of the outgoing
-track. Off, the slider value is used.
+track; the slider value is the minimum. Off, the slider value is used.
 
 ## MIDI controllers
 
@@ -136,7 +153,9 @@ own registered at
    OAuth 2.1 with PKCE; your password never passes through the app.
 
 Then search, or paste a track, set or artist link. Your likes load
-with the **♥ Likes** button. Streaming needs the login; search and
+with the **♥ Likes** button, and **Playlists** loads the tracks of all
+your own and liked playlists with the playlist name in the Album column,
+so the filter box searches across them. Streaming needs the login; search and
 links work with the app credentials alone. Tokens are refreshed
 automatically and kept in `~/.config/pengu-deck/settings.ini`; the
 credentials can also come from the environment as

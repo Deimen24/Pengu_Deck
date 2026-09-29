@@ -19,6 +19,8 @@ void pd_mixer_view_nudge_xfader(PdMixerView *v, double delta);
 void pd_mixer_view_set_xfader(PdMixerView *v, double value);
 void pd_mixer_view_set_decks(PdMixerView *v, int n);
 void pd_mixer_view_apply_config(PdMixerView *v);
+/* Same levels as pd_deck_view_set_compact(). */
+void pd_mixer_view_set_compact(PdMixerView *v, int level);
 
 G_END_DECLS
 

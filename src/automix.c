@@ -3,19 +3,23 @@
  * automix.c - hands free playback of the queue
  */
 #include <math.h>
+#include <stdlib.h>
+#include <string.h>
 #include <stdarg.h>
 
 #include "analyze.h"
 #include "automix.h"
+#include "cuestore.h"
 
 #define TICK_MS		100
-#define PRELOAD_SECS	20.0	/* load the next track this early */
 #define DECKS_USED	2	/* A and B */
 #define FADE_MIN	3.0
 #define FADE_MAX	45.0
 #define OUTRO_MAX	30.0
-#define BLEND_BEATS	16.0	/* beat matched blends */
+#define BLEND_BEATS	32.0	/* beat matched blends */
+#define INTRO_MAX	32.0	/* an intro up to this long is blended over */
 #define CUT_MAX		8.0	/* when tempos cannot be matched */
+#define UNMIXABLE	10.0	/* score: tempo out of the pitch range */
 
 enum state {
 	AM_IDLE,		/* nothing playing, waiting for the queue */
@@ -80,13 +84,83 @@ static bool failed(int i)
 	       atomic_load(&t->state) == TRACK_FAILED;
 }
 
-static PdMediaItem *pop_queue(void)
+static double item_bpm(PdMediaItem *m)
+{
+	return m->bpm > 0.0 ? m->bpm : cuestore_bpm(m->key);
+}
+
+/*
+ * How well @m follows the track on deck @from: 0 is a perfect match.
+ * Tempo counts most: the pitch needed to match, as a share of the pitch
+ * range (half and double time count as well), out of range is a cut.
+ * Key adds a little: same or neighbouring Camelot keys mix cleanly.
+ * Unknown values sit in the middle so analysed tracks are preferred.
+ */
+static double match_score(int from, PdMediaItem *m)
+{
+	double bpm = deck_bpm(deck(from)), b = item_bpm(m);
+	double range = am.app->cfg.pitch_range / 100.0;
+	double score = 0.0;
+	struct track *t = deck_track(deck(from));
+	int key = t ? atomic_load(&t->mkey) : -1;
+	int mkey = cuestore_key(m->key);
+
+	if (bpm > 0.0 && b > 0.0) {
+		double r = b / bpm;
+
+		if (r > 1.5)
+			r /= 2.0;
+		else if (r < 0.75)
+			r *= 2.0;
+		score += fabs(r - 1.0) > range ? UNMIXABLE :
+			 fabs(r - 1.0) / range;
+	} else {
+		score += 1.0;
+	}
+	if (key >= 0 && mkey >= 0) {
+		/* Camelot wheel: same 0, neighbour or relative 1, and on */
+		const char *ca = key_camelot(key), *cb = key_camelot(mkey);
+		int d = abs(atoi(ca) - atoi(cb));
+
+		if (d > 6)
+			d = 12 - d;
+		if (ca[strlen(ca) - 1] != cb[strlen(cb) - 1])
+			d++;
+		score += fmin(d, 3) * 0.25;
+	} else {
+		score += 0.5;
+	}
+	return score;
+}
+
+/*
+ * Take the next track out of the queue: the first one, or with smart
+ * order the one that best follows what plays on deck @from.
+ */
+static PdMediaItem *pop_queue(int from)
 {
 	GListStore *q = am.app->queue;
-	PdMediaItem *m = g_list_model_get_item(G_LIST_MODEL(q), 0);
+	guint n = g_list_model_get_n_items(G_LIST_MODEL(q)), i, best = 0;
+	double best_score = 0.0;
+	PdMediaItem *m;
 
-	if (m)
-		g_list_store_remove(q, 0);
+	if (n == 0)
+		return NULL;
+	if (am.app->cfg.automix_smart && from >= 0 && deck_track(deck(from))) {
+		for (i = 0; i < n; i++) {
+			double s;
+
+			m = g_list_model_get_item(G_LIST_MODEL(q), i);
+			s = match_score(from, m);
+			g_object_unref(m);
+			if (i == 0 || s < best_score - 1e-9) {
+				best_score = s;
+				best = i;
+			}
+		}
+	}
+	m = g_list_model_get_item(G_LIST_MODEL(q), best);
+	g_list_store_remove(q, best);
 	return m;
 }
 
@@ -115,21 +189,36 @@ static double side_value(int i)
 /* Load the head of the queue into deck @i, false when the queue is empty. */
 static bool load_next(int i)
 {
-	PdMediaItem *m = pop_queue();
+	PdMediaItem *m = pop_queue(i ^ 1);
 
 	if (!m)
 		return false;
+	am.app->automix_loading = TRUE;
 	app_load_item(am.app, i, m);
+	am.app->automix_loading = FALSE;
 	g_object_unref(m);
 	return true;
 }
 
+/*
+ * A deck the user loaded and did not play yet is the next track: it
+ * takes precedence over the queue and is never overwritten.
+ */
+static bool hand_ready(int i)
+{
+	return am.app->by_hand[i] && loaded(i) &&
+	       !atomic_load(&deck(i)->playing) && remaining(i) > 1.0;
+}
+
+/* Start deck @i; one the user already started plays on untouched. */
 static void start_deck(int i, double at)
 {
 	struct deck *d = deck(i);
 
-	deck_seek(d, at >= 0.0 ? at : d->cue);
-	deck_play(d, true);
+	if (!atomic_load(&d->playing)) {
+		deck_seek(d, at >= 0.0 ? at : d->cue);
+		deck_play(d, true);
+	}
 	if (i == am.active)
 		am.started = true;
 }
@@ -173,10 +262,19 @@ static void plan_transition(int from, int to)
 	outro = analyze_quiet_tail(tf);
 	intro = analyze_quiet_head(tt, (size_t)deck(to)->cue);
 
+	/*
+	 * Matched tempos: a long blend, the base length or BLEND_BEATS,
+	 * whichever is longer.  A quiet outro is covered so the incoming
+	 * track carries the end; a quiet intro up to INTRO_MAX is blended
+	 * over so its first drop lands as the fade ends, a longer one is
+	 * skipped.  Unmatched tempos get a short cut instead.
+	 */
 	if (match && bpm > 0.0)
 		len = fmax(len, BLEND_BEATS * 60.0 / bpm);
 	if (outro >= 4.0)
-		len = fmax(len, fmin(outro, OUTRO_MAX));
+		len = fmax(len, fmin(outro + 2.0, OUTRO_MAX));
+	if (intro >= 4.0 && intro <= INTRO_MAX)
+		len = fmax(len, intro);
 	if (!match)
 		len = fmin(len, CUT_MAX);
 	len = CLAMP(len, FADE_MIN, FADE_MAX);
@@ -184,7 +282,7 @@ static void plan_transition(int from, int to)
 	/* Never fade longer than what is left of the outgoing track. */
 	len = fmin(len, fmax(FADE_MIN, remaining(from) - 0.5));
 
-	if (deck(to)->cue <= 0.0 && intro > len + 4.0)
+	if (deck(to)->cue <= 0.0 && intro > INTRO_MAX)
 		am.plan_start = (intro - len) * tt->rate;
 	am.plan_len = len;
 }
@@ -203,6 +301,7 @@ static void begin_fade(void)
 	if (!am.planned)
 		plan_transition(am.active, am.next);
 	am.started = true;
+	am.app->by_hand[am.next] = FALSE;
 	start_deck(am.next, am.plan_start);
 	if (am.app->cfg.automix_sync)
 		deck_sync_phase(to, from);
@@ -239,11 +338,22 @@ static int pick_start_deck(void)
 static void tick_idle(void)
 {
 	int i = pick_start_deck();
+	int k;
 
 	if (atomic_load(&deck(i)->playing)) {
 		am.active = i;
 		am.started = true;
 		am.state = AM_PLAYING;
+		return;
+	}
+	for (k = 0; k < DECKS_USED; k++) {
+		if (!hand_ready(k))
+			continue;
+		am.active = k;
+		am.next = -1;
+		am.started = false;
+		am.state = AM_PLAYING;
+		set_status("Automix: starting deck %c", app_deck_letter(k));
 		return;
 	}
 	if (!load_next(i)) {
@@ -288,13 +398,13 @@ static void tick_playing(void)
 	set_status("Automix: deck %c, %d s left",
 		   app_deck_letter(am.active), (int)remaining(am.active));
 
-	if (remaining(am.active) > PRELOAD_SECS + (am.app->cfg.automix_auto ?
-						   FADE_MAX :
-						   am.app->cfg.automix_fade))
-		return;
+	/*
+	 * Load the next track as soon as the other deck is free, so it
+	 * is decoded and analysed long before the transition is due.
+	 */
 	if (atomic_load(&deck(other)->playing) || am.app->loading[other])
 		return;
-	if (!load_next(other))
+	if (!hand_ready(other) && !load_next(other))
 		return;
 	am.next = other;
 	am.state = AM_PRELOADED;
@@ -432,8 +542,9 @@ void automix_next(void)
 	if (am.state != AM_PLAYING)
 		return;
 	other = am.active ^ 1;
-	if (atomic_load(&deck(other)->playing) || am.app->loading[other] ||
-	    !load_next(other))
+	if (atomic_load(&deck(other)->playing) || am.app->loading[other])
+		return;
+	if (!hand_ready(other) && !load_next(other))
 		return;
 	am.next = other;
 	am.state = AM_PRELOADED;
