@@ -119,6 +119,61 @@ char *net_get(const char *url, const char *auth, long *status,
 	return request(url, NULL, auth, status, NULL, err);
 }
 
+char *net_final_url(const char *url, const char *auth, long *status,
+		    GError **err)
+{
+	struct curl_slist *hdr = NULL;
+	GString *body = g_string_new(NULL);
+	char *line = NULL, *final = NULL, *eff = NULL;
+	long code = 0;
+	CURLcode rc;
+	CURL *c;
+
+	net_init();
+	c = curl_easy_init();
+	if (!c) {
+		g_set_error(err, NET_ERROR, NET_ERROR_TRANSPORT,
+			    "Could not create an HTTP handle");
+		g_string_free(body, TRUE);
+		return NULL;
+	}
+	if (auth) {
+		line = g_strdup_printf("Authorization: %s", auth);
+		hdr = curl_slist_append(hdr, line);
+	}
+	curl_easy_setopt(c, CURLOPT_URL, url);
+	curl_easy_setopt(c, CURLOPT_HTTPHEADER, hdr);
+	curl_easy_setopt(c, CURLOPT_USERAGENT, USER_AGENT);
+	curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(c, CURLOPT_MAXREDIRS, 8L);
+	/* the auth header is for the API only, not the media host */
+	curl_easy_setopt(c, CURLOPT_UNRESTRICTED_AUTH, 0L);
+	curl_easy_setopt(c, CURLOPT_RANGE, "0-0");
+	curl_easy_setopt(c, CURLOPT_CONNECTTIMEOUT, 15L);
+	curl_easy_setopt(c, CURLOPT_TIMEOUT, 30L);
+	curl_easy_setopt(c, CURLOPT_NOSIGNAL, 1L);
+	curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, write_cb);
+	curl_easy_setopt(c, CURLOPT_WRITEDATA, body);
+	rc = curl_easy_perform(c);
+	curl_easy_getinfo(c, CURLINFO_RESPONSE_CODE, &code);
+	curl_easy_getinfo(c, CURLINFO_EFFECTIVE_URL, &eff);
+	g_debug("RESOLVE %s -> %ld %s", url, code, eff ? eff : "");
+	if (status)
+		*status = code;
+	if (rc != CURLE_OK)
+		g_set_error(err, NET_ERROR, NET_ERROR_TRANSPORT, "%s",
+			    curl_easy_strerror(rc));
+	else if (code >= 400)
+		g_set_error(err, NET_ERROR, NET_ERROR_HTTP, "HTTP %ld", code);
+	else
+		final = g_strdup(eff ? eff : url);
+	curl_easy_cleanup(c);
+	curl_slist_free_all(hdr);
+	g_free(line);
+	g_string_free(body, TRUE);
+	return final;
+}
+
 char *net_post_form(const char *url, const char *form, const char *auth,
 		    long *status, char **reply, GError **err)
 {

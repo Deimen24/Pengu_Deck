@@ -31,4 +31,12 @@ char *net_get(const char *url, const char *auth, long *status,
 char *net_post_form(const char *url, const char *form, const char *auth,
 		    long *status, char **reply, GError **err);
 
+/*
+ * Follow the redirects of @url (fetching one byte at most) and return
+ * the address it finally lands on, so a player without the auth header
+ * can open it.  NULL with @err set.
+ */
+char *net_final_url(const char *url, const char *auth, long *status,
+		    GError **err);
+
 #endif /* PD_NET_H */

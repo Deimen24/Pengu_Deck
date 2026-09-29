@@ -78,6 +78,9 @@ GPtrArray *sc_likes(GError **err);
 /* Returns a URL FFmpeg can open (progressive MP3 or an HLS playlist). */
 char *sc_stream_url(PdMediaItem *item, GError **err);
 
+/* Does @url live on the API host, i.e. must it be fetched with the token? */
+gboolean sc_url_is_api(const char *url);
+
 /* Exposed for the tests. */
 GPtrArray *sc_parse_tracks(const char *json, GError **err);
 gboolean sc_parse_token_reply(const char *json, struct sc_tokens *out,

@@ -15,6 +15,7 @@
 #include "analyze.h"
 #include "pd-build.h"
 #include "decoder.h"
+#include "soundcloud.h"
 
 #define OUT_FRAMES	8192
 /* the CDN sits behind the same bot protection as the site */
@@ -76,6 +77,19 @@ int decoder_open_input(AVFormatContext **fmt, const char *uri,
 		av_dict_set(&opts, "reconnect", "1", 0);
 		av_dict_set(&opts, "reconnect_streamed", "1", 0);
 		av_dict_set(&opts, "rw_timeout", "20000000", 0);
+	}
+	/* audio served by the SoundCloud API host itself wants the token */
+	if (sc_url_is_api(uri)) {
+		char *token = sc_session_token(NULL);
+
+		if (token) {
+			char *hdr = g_strdup_printf("Authorization: OAuth %s"
+						    "\r\n", token);
+
+			av_dict_set(&opts, "headers", hdr, 0);
+			g_free(hdr);
+			g_free(token);
+		}
 	}
 	ret = avformat_open_input(fmt, uri, NULL, &opts);
 	av_dict_free(&opts);

@@ -2,6 +2,8 @@
 /*
  * soundcloud.c - SoundCloud public API client
  */
+#define G_LOG_DOMAIN "pengu-deck"
+
 #include <string.h>
 
 #include <json-glib/json-glib.h>
@@ -727,6 +729,14 @@ GPtrArray *sc_likes(GError **err)
 	return res;
 }
 
+gboolean sc_url_is_api(const char *url)
+{
+	const char *base = api_base();
+	size_t n = strlen(base);
+
+	return url && strncmp(url, base, n) == 0 && url[n] == '/';
+}
+
 /* Progressive MP3 first: FFmpeg seeks it freely; then the HLS variants. */
 static const char *const stream_keys[] = {
 	"http_mp3_128_url",
@@ -763,15 +773,48 @@ char *sc_stream_url(PdMediaItem *m, GError **err)
 	if (!root)
 		return NULL;
 	o = JSON_NODE_HOLDS_OBJECT(root) ? json_node_get_object(root) : NULL;
+	if (o) {
+		GList *members = json_object_get_members(o), *l;
+
+		for (l = members; l; l = l->next)
+			g_debug("  streams: %s", (const char *)l->data);
+		g_list_free(members);
+	}
 	for (i = 0; i < G_N_ELEMENTS(stream_keys) && !res; i++) {
 		const char *s = str_member(o, stream_keys[i]);
 
 		if (s && *s)
 			res = g_strdup(s);
 	}
-	if (!res)
+	json_node_unref(root);
+	if (!res) {
 		g_set_error(err, SC_ERROR, SC_ERROR_NOT_STREAMABLE,
 			    "SoundCloud did not return a stream");
-	json_node_unref(root);
+		return NULL;
+	}
+	/*
+	 * The Streams URLs sit on the API host and "need to keep using
+	 * authentication" (spec).  Follow them with the token so the
+	 * player gets the media host address; when the host serves the
+	 * audio itself, the decoder sends the token (sc_url_is_api()).
+	 */
+	if (sc_url_is_api(res)) {
+		char *token = sc_session_token(err);
+		char *hdr, *final;
+		long status = 0;
+
+		if (!token) {
+			g_free(res);
+			return NULL;
+		}
+		hdr = g_strdup_printf("OAuth %s", token);
+		final = net_final_url(res, hdr, &status, err);
+		g_free(hdr);
+		g_free(token);
+		g_free(res);
+		if (!final && status)
+			refuse(err, status);
+		return final;
+	}
 	return res;
 }
