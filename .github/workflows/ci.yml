@@ -80,6 +80,7 @@ jobs:
           meson test -C build --print-errorlogs
       - name: Package (rpmbuild)
         run: |
+          git config --global --add safe.directory "$GITHUB_WORKSPACE"
           mkdir -p ~/rpmbuild/SOURCES
           git archive --prefix=Pengu_Deck-0.1.0/ -o ~/rpmbuild/SOURCES/Pengu_Deck-0.1.0.tar.gz HEAD
           rpmbuild -bb packaging/fedora/pengu-deck.spec
