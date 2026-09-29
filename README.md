@@ -142,10 +142,25 @@ while the crossfader moves. Afterwards the new deck glides back to its
 own tempo over 30 s. Touching a pitch fader while it glides takes it
 over.
 
-Every blend starts on a downbeat of the outgoing track, eases the
-crossfader in and out, and swaps the bass: the outgoing lows go down
-over the first part, the incoming lows come up over the last part, and
-both EQs return to where they were.
+Silence is never played: a blend ends where the outgoing track's music
+ends, whatever silence follows, and the incoming track starts after
+any leading silence. Every blend is planned to start on a 16 beat
+phrase of the outgoing track and to run to its end; the incoming track
+comes in on a bar of its own grid, or a phrase when one is near. While
+it runs:
+
+- the crossfader moves on an equal power curve, eased in and out
+- the lows are swapped: the outgoing lows leave over the first 60 %,
+  the incoming lows arrive over the last 60 %
+- the incoming mids start a little under and rise early, the outgoing
+  mids dip late, and a low pass sweep takes the outgoing track's edge
+  off in the last stretch; the highs are left to the crossfader
+- from the middle of the blend both decks drift together towards the
+  incoming track's own tempo, and the new deck finishes that glide on
+  its own afterwards
+
+EQ, filter and crossfader curve return to where they were after the
+blend, or right away when automix is switched off during one.
 
 ## MIDI controllers
 

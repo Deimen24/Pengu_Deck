@@ -28,7 +28,11 @@
 #define LOCK_SECS	2.0	/* time the beat lock takes to close a gap */
 #define LOCK_DEAD	0.005	/* beats: closer than this counts as locked */
 #define LOW_CUT		-20.0	/* dB the lows are taken down to in a blend */
+#define MID_DIP		-8.0	/* dB the outgoing mids give way by the end */
+#define MID_IN		-6.0	/* dB the incoming mids start below */
+#define LPF_SWEEP	-0.6	/* outgoing filter knob at the end of the blend */
 #define BAR_BEATS	4.0
+#define PHRASE_BEATS	16.0	/* blends start on a phrase of the outgoing track */
 #define BAR_TOL		0.08	/* bars: close enough to a downbeat to go */
 
 enum state {
@@ -59,7 +63,11 @@ static struct {
 	struct glide ret;	/* new active deck back to 0 % */
 	bool prepped;
 	gint64 due_at;		/* the blend is due, waiting for a downbeat */
-	float low_from, low_to;	/* low EQ before the blend, restored after */
+	double tempo_ratio;	/* outgoing over incoming tempo at the blend */
+	float eq_from[EQ_BANDS];	/* EQ and filter before the blend, */
+	float eq_to[EQ_BANDS];		/* restored after */
+	float filt_from;
+	int xf_curve;			/* the user's crossfader curve */
 	enum state state;
 	int active;		/* deck currently carrying the mix */
 	int next;		/* deck holding the upcoming track */
@@ -81,7 +89,12 @@ static struct deck *deck(int i)
 	return &am.app->engine.deck[i];
 }
 
-static double remaining(int i)
+/*
+ * Where the music of deck @i ends, in frames: trailing silence is not
+ * part of the track as far as automix is concerned, so a blend ends
+ * there and never leaves a gap.
+ */
+static double audible_end(int i)
 {
 	struct track *t = deck_track(deck(i));
 	double len;
@@ -89,7 +102,18 @@ static double remaining(int i)
 	if (!t)
 		return 0.0;
 	len = (double)track_length(t);
-	return (len - deck_position(deck(i))) / t->rate;
+	if (track_done(t))
+		len -= analyze_silence_tail(t) * t->rate;
+	return fmax(len, 0.0);
+}
+
+static double remaining(int i)
+{
+	struct track *t = deck_track(deck(i));
+
+	if (!t)
+		return 0.0;
+	return (audible_end(i) - deck_position(deck(i))) / t->rate;
 }
 
 /*
@@ -354,17 +378,82 @@ static double ease(double t)
 	return t * t * (3.0 - 2.0 * t);
 }
 
-/* Bass swap: the outgoing lows go first, the incoming lows come last. */
-static void bass_swap(double t)
+static double lerp(double a, double b, double t)
+{
+	return a + (b - a) * t;
+}
+
+/*
+ * The frequency hand over.  Lows are swapped: the outgoing lows leave
+ * over the first 60 %, the incoming lows arrive over the last 60 %, so
+ * two bass lines never fight.  Mids cross more gently: the incoming
+ * starts a little under and rises early, the outgoing dips late.  The
+ * highs are left to the crossfader, they carry the new track's
+ * character from the first bar.  A low pass sweep takes the outgoing
+ * track's edge off in the last stretch.  Everything returns after.
+ */
+static void blend_eq(double t)
 {
 	struct deck *from = deck(am.active), *to = deck(am.next);
-	double out = ease(t / 0.7);
-	double in = ease((t - 0.3) / 0.7);
 
 	atomic_store(&from->eq_db[EQ_LOW],
-		     (float)(am.low_from + (LOW_CUT - am.low_from) * out));
+		     (float)lerp(am.eq_from[EQ_LOW], LOW_CUT, ease(t / 0.6)));
+	atomic_store(&from->eq_db[EQ_MID],
+		     (float)lerp(am.eq_from[EQ_MID], am.eq_from[EQ_MID] + MID_DIP,
+				 ease((t - 0.4) / 0.6)));
+	if (fabs(am.filt_from) < 0.05)
+		atomic_store(&from->filter,
+			     (float)lerp(0.0, LPF_SWEEP, ease((t - 0.6) / 0.4)));
 	atomic_store(&to->eq_db[EQ_LOW],
-		     (float)(LOW_CUT + (am.low_to - LOW_CUT) * in));
+		     (float)lerp(LOW_CUT, am.eq_to[EQ_LOW], ease((t - 0.4) / 0.6)));
+	atomic_store(&to->eq_db[EQ_MID],
+		     (float)lerp(am.eq_to[EQ_MID] + MID_IN, am.eq_to[EQ_MID],
+				 ease(t / 0.6)));
+}
+
+static void blend_save(void)
+{
+	struct deck *from = deck(am.active), *to = deck(am.next);
+	int b;
+
+	for (b = 0; b < EQ_BANDS; b++) {
+		am.eq_from[b] = atomic_load(&from->eq_db[b]);
+		am.eq_to[b] = atomic_load(&to->eq_db[b]);
+	}
+	am.filt_from = atomic_load(&from->filter);
+	am.xf_curve = atomic_load(&am.app->engine.xf_curve);
+	/* equal power while automix fades: no bump in the middle */
+	atomic_store(&am.app->engine.xf_curve, XF_POWER);
+}
+
+static void blend_restore(void)
+{
+	struct deck *from = deck(am.active), *to = deck(am.next);
+	int b;
+
+	for (b = 0; b < EQ_BANDS; b++) {
+		atomic_store(&from->eq_db[b], am.eq_from[b]);
+		atomic_store(&to->eq_db[b], am.eq_to[b]);
+	}
+	atomic_store(&from->filter, am.filt_from);
+	atomic_store(&am.app->engine.xf_curve, am.xf_curve);
+	atomic_store(&to->bend, 0.0f);
+}
+
+/* Snap @frame of @t to its nearest bar, or phrase when one is that close. */
+static double snap_grid(struct track *t, double frame)
+{
+	double b = track_beat_len(t), off, beats, bar, phrase;
+
+	if (b <= 0.0)
+		return frame;
+	off = atomic_load(&t->beat_offset);
+	beats = (frame - off) / b;
+	bar = floor(beats / BAR_BEATS + 0.5) * BAR_BEATS;
+	phrase = floor(beats / PHRASE_BEATS + 0.5) * PHRASE_BEATS;
+	if (fabs(phrase - beats) <= BAR_BEATS)
+		bar = phrase;
+	return fmax(0.0, off + bar * b);
 }
 
 /* Load the head of the queue into deck @i, false when the queue is empty. */
@@ -398,9 +487,21 @@ static bool hand_ready(int i)
 static void start_deck(int i, double at)
 {
 	struct deck *d = deck(i);
+	struct track *t = deck_track(d);
 
 	if (!atomic_load(&d->playing)) {
-		deck_seek(d, at >= 0.0 ? at : d->cue);
+		double lead;
+
+		if (at < 0.0)
+			at = d->cue;
+		/* never play leading silence */
+		lead = t ? analyze_silence_head(t, (size_t)at) : 0.0;
+		if (lead > 0.0) {
+			g_debug("automix: deck %c skips %.1f s of silence",
+				app_deck_letter(i), lead);
+			at += lead * t->rate;
+		}
+		deck_seek(d, at);
 		deck_play(d, true);
 	}
 	if (i == am.active)
@@ -467,8 +568,20 @@ static void plan_transition(int from, int to)
 			am.meet_from * 100.0, app_deck_letter(to),
 			am.meet_to * 100.0);
 	bpm = deck_bpm(deck(from));
-	outro = analyze_quiet_tail(tf);
-	intro = analyze_quiet_head(tt, (size_t)deck(to)->cue);
+	/* silence is skipped outright; quiet is what the blend covers */
+	outro = fmax(0.0, analyze_quiet_tail(tf) - analyze_silence_tail(tf));
+	{
+		double lead = analyze_silence_head(tt, (size_t)deck(to)->cue);
+
+		if (lead > 0.0)
+			am.plan_start = deck(to)->cue + lead * tt->rate;
+		intro = analyze_quiet_head(tt, (size_t)(deck(to)->cue +
+						       lead * tt->rate));
+	}
+	g_debug("automix: %c silence at end %.1f s, %c silence at start "
+		"%.1f s", app_deck_letter(from), analyze_silence_tail(tf),
+		app_deck_letter(to),
+		analyze_silence_head(tt, (size_t)deck(to)->cue));
 
 	/*
 	 * Matched tempos: a long blend, the base length or BLEND_BEATS,
@@ -490,8 +603,35 @@ static void plan_transition(int from, int to)
 	/* Never fade longer than what is left of the outgoing track. */
 	len = fmin(len, fmax(FADE_MIN, remaining(from) - 0.5));
 
+	/*
+	 * Start on a phrase of the outgoing track and run to its end: the
+	 * last 16 beat boundary that leaves room for the blend, or the
+	 * next one when that has passed already.
+	 */
+	if (match && track_beat_len(tf) > 0.0 && track_done(tf)) {
+		double b = track_beat_len(tf);
+		double off = atomic_load(&tf->beat_offset);
+		double end = audible_end(from);
+		double pos = deck_position(deck(from));
+		double beats = (end - len * tf->rate - off) / b;
+		double start = off + floor(beats / PHRASE_BEATS) *
+			       PHRASE_BEATS * b;
+		double phrase_len = PHRASE_BEATS * b;
+
+		while (start < pos + 0.3 * tf->rate)
+			start += phrase_len;
+		if ((end - start) / tf->rate >= FADE_MIN &&
+		    (end - start) / tf->rate <= FADE_MAX)
+			len = (end - start) / tf->rate;
+	}
+
 	if (deck(to)->cue <= 0.0 && intro > INTRO_MAX)
-		am.plan_start = (intro - len) * tt->rate;
+		am.plan_start = fmax(am.plan_start, 0.0) +
+				(intro - len) * tt->rate;
+	/* the incoming track comes in on a bar, or a phrase when near one */
+	if (match && atomic_load(&tt->analysed))
+		am.plan_start = snap_grid(tt, am.plan_start >= 0.0 ?
+					  am.plan_start : deck(to)->cue);
 	am.plan_len = len;
 }
 
@@ -504,6 +644,7 @@ static void begin_fade(void)
 		plan_transition(am.active, am.next);
 	am.prep.on = false;
 	am.ret.on = false;
+	am.ret.deck = -1;
 	if (am.app->cfg.automix_sync) {
 		double p;
 
@@ -516,10 +657,10 @@ static void begin_fade(void)
 	}
 	am.started = true;
 	am.app->by_hand[am.next] = FALSE;
-	am.low_from = atomic_load(&from->eq_db[EQ_LOW]);
-	am.low_to = atomic_load(&to->eq_db[EQ_LOW]);
+	blend_save();
 	/* the incoming track enters without its lows, they come in later */
 	atomic_store(&to->eq_db[EQ_LOW], (float)LOW_CUT);
+	atomic_store(&to->eq_db[EQ_MID], (float)(am.eq_to[EQ_MID] + MID_IN));
 	start_deck(am.next, am.plan_start);
 	if (am.app->cfg.automix_sync) {
 		deck_sync_phase(to, from);
@@ -527,6 +668,8 @@ static void begin_fade(void)
 	}
 	pd_media_item_changed("*");
 
+	am.tempo_ratio = deck_bpm(to) > 0.0 ? deck_bpm(from) / deck_bpm(to) :
+			 0.0;
 	am.fade_start = g_get_monotonic_time();
 	am.fade_from = atomic_load(&am.app->engine.xfader);
 	am.fade_to = side_value(am.next);
@@ -537,17 +680,15 @@ static void begin_fade(void)
 static void end_fade(void)
 {
 	deck_play(deck(am.active), false);
-	atomic_store(&deck(am.next)->bend, 0.0f);
-	atomic_store(&deck(am.active)->eq_db[EQ_LOW], am.low_from);
-	atomic_store(&deck(am.next)->eq_db[EQ_LOW], am.low_to);
+	blend_restore();
 	pd_media_item_changed("*");
 	am.app->by_hand[am.active] = FALSE;
 	am.active = am.next;
 	am.next = -1;
 	am.state = AM_PLAYING;
 	am.prepped = false;
-	/* back to the track's own tempo, slowly enough not to hear it */
-	if (am.app->cfg.automix_sync &&
+	/* back to the track's own tempo, unless the blend started that */
+	if (am.app->cfg.automix_sync && !(am.ret.on && am.ret.deck == am.active) &&
 	    fabs(atomic_load(&deck(am.active)->pitch)) > 1e-4)
 		glide_start(&am.ret, am.active, 0.0, RETURN_SECS);
 }
@@ -633,6 +774,12 @@ static void tick_playing(void)
 
 	set_status("Automix: deck %c, %d s left",
 		   app_deck_letter(am.active), (int)remaining(am.active));
+	if (remaining(am.active) <= 0.0) {
+		/* only silence is left: end it here, do not play the gap */
+		deck_play(d, false);
+		am.state = AM_IDLE;
+		return;
+	}
 
 	/*
 	 * Load the next track as soon as the other deck is free, so it
@@ -672,9 +819,11 @@ static void tick_preloaded(void)
 	if (!am.planned || (!am.plan_final &&
 			    g_get_monotonic_time() - am.plan_time > G_USEC_PER_SEC))
 		plan_transition(am.active, am.next);
-	set_status("Automix: deck %c, %d s left, %c next, %d s blend",
-		   app_deck_letter(am.active), (int)remaining(am.active),
-		   app_deck_letter(am.next), (int)am.plan_len);
+	if (!am.due_at)
+		set_status("Automix: deck %c, %d s left, %c next, %d s blend",
+			   app_deck_letter(am.active),
+			   (int)remaining(am.active),
+			   app_deck_letter(am.next), (int)am.plan_len);
 	if (!atomic_load(&deck(am.active)->playing) && !am.force &&
 	    remaining(am.active) > 1.0) {
 		/* Paused by hand: hold the transition until play resumes. */
@@ -728,12 +877,49 @@ static void tick_fading(void)
 		t = 1.0;
 	x = am.fade_from + (am.fade_to - am.fade_from) * ease(t);
 	atomic_store(&am.app->engine.xfader, (float)x);
-	bass_swap(t);
-	if (am.app->cfg.automix_sync && am.match)
+	blend_eq(t);
+	if (am.app->cfg.automix_sync && am.match) {
+		/*
+		 * From the middle of the blend on, both decks drift
+		 * together towards the incoming track's own tempo: the
+		 * return glide starts here and the outgoing deck follows
+		 * it, so the pair stays locked while the tempo settles.
+		 */
+		if (t >= 0.5 && !am.ret.on && am.ret.deck != am.next &&
+		    fabs(atomic_load(&deck(am.next)->pitch)) > 1e-4)
+			glide_start(&am.ret, am.next, 0.0, RETURN_SECS);
+		if (am.ret.on && am.ret.deck == am.next && am.tempo_ratio > 0.0) {
+			struct track *tf = deck_track(deck(am.active));
+			struct track *tt = deck_track(deck(am.next));
+			double bf = tf ? atomic_load(&tf->bpm) : 0.0;
+			double bt = tt ? atomic_load(&tt->bpm) : 0.0;
+
+			if (bf > 0.0 && bt > 0.0) {
+				double pt = atomic_load(&deck(am.next)->pitch);
+				double pf = am.tempo_ratio * bt * (1.0 + pt) /
+					    bf - 1.0;
+
+				atomic_store(&deck(am.active)->pitch,
+					     (float)pf);
+			}
+		}
 		beat_lock(am.active, am.next);
+	}
 	set_status("Automix: mixing %c → %c over %d s",
 		   app_deck_letter(am.active), app_deck_letter(am.next),
 		   (int)secs);
+	if ((int)(t * 10.0) != (int)((t - 0.02) * 10.0))
+		g_debug("automix: blend %.0f%%: xf %.2f, %c low %.0f mid %.0f "
+			"filt %.2f pitch %.1f%%, %c low %.0f mid %.0f pitch "
+			"%.1f%%", t * 100.0, x, app_deck_letter(am.active),
+			atomic_load(&deck(am.active)->eq_db[EQ_LOW]),
+			atomic_load(&deck(am.active)->eq_db[EQ_MID]),
+			atomic_load(&deck(am.active)->filter),
+			atomic_load(&deck(am.active)->pitch) * 100.0,
+			app_deck_letter(am.next),
+			atomic_load(&deck(am.next)->eq_db[EQ_LOW]),
+			atomic_load(&deck(am.next)->eq_db[EQ_MID]),
+			atomic_load(&deck(am.next)->pitch) * 100.0);
 	if (t >= 1.0)
 		end_fade();
 }
@@ -785,13 +971,8 @@ void automix_set_enabled(bool on)
 		if (am.timer)
 			g_source_remove(am.timer);
 		am.timer = 0;
-		if (am.state == AM_FADING) {
-			/* stopped mid blend: undo what the blend was doing */
-			atomic_store(&deck(am.active)->eq_db[EQ_LOW],
-				     am.low_from);
-			atomic_store(&deck(am.next)->eq_db[EQ_LOW], am.low_to);
-			atomic_store(&deck(am.next)->bend, 0.0f);
-		}
+		if (am.state == AM_FADING)
+			blend_restore();	/* stopped mid blend */
 		am.prep.on = false;
 		am.ret.on = false;
 		am.state = AM_IDLE;

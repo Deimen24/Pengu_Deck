@@ -39,5 +39,8 @@ float analyze_gain(const struct track *t);
  */
 double analyze_quiet_tail(const struct track *t);
 double analyze_quiet_head(const struct track *t, size_t from);
+/* Plain silence at the end, and from @from on: never worth playing. */
+double analyze_silence_tail(const struct track *t);
+double analyze_silence_head(const struct track *t, size_t from);
 
 #endif /* PD_ANALYZE_H */

@@ -504,6 +504,40 @@ static double *seconds_profile(const struct track *t, size_t *n,
 	return e;
 }
 
+#define SILENCE_PEAK	2	/* of 255: about -42 dBFS */
+#define MAX_SILENCE_SECS 300.0
+
+/* Seconds of silence (not just quiet) at the end of a decoded track. */
+double analyze_silence_tail(const struct track *t)
+{
+	size_t bins = track_bins(t), i;
+	double per_bin = (double)WAVE_BIN_FRAMES / t->rate, secs = 0.0;
+
+	if (!track_done(t))
+		return 0.0;
+	for (i = bins; i > 0 && secs < MAX_SILENCE_SECS; i--) {
+		if (track_bin(t, i - 1)->peak > SILENCE_PEAK)
+			break;
+		secs += per_bin;
+	}
+	return secs;
+}
+
+/* Seconds of silence from frame @from on. */
+double analyze_silence_head(const struct track *t, size_t from)
+{
+	size_t bins = track_bins(t), i;
+	double per_bin = (double)WAVE_BIN_FRAMES / t->rate, secs = 0.0;
+
+	for (i = from / WAVE_BIN_FRAMES; i < bins && secs < MAX_SILENCE_SECS;
+	     i++) {
+		if (track_bin(t, i)->peak > SILENCE_PEAK)
+			break;
+		secs += per_bin;
+	}
+	return secs;
+}
+
 double analyze_quiet_tail(const struct track *t)
 {
 	size_t n, i;
