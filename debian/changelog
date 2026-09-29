@@ -1,3 +1,13 @@
+pengu-deck (0.1.1-1) unstable; urgency=medium
+
+  * Compact single line track list with artist, album and genre columns.
+  * Played tracks marked as whole rows, dark theme forced.
+  * Automix transitions sized from the tracks.
+  * Fix crash when switching the list to History or a playlist.
+  * Releases published by the workflow itself.
+
+ -- deimen24 <da.husmann24@gmail.com>  Tue, 29 Sep 2026 13:00:00 +0000
+
 pengu-deck (0.1.0-1) unstable; urgency=medium
 
   * First release.
