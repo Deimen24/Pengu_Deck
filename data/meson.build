@@ -6,6 +6,9 @@ install_data(app_id + '.metainfo.xml',
 	install_dir: get_option('datadir') / 'metainfo')
 install_data(app_id + '.svg',
 	install_dir: get_option('datadir') / 'icons/hicolor/scalable/apps')
+install_data(app_id + '-128.png',
+	rename: app_id + '.png',
+	install_dir: get_option('datadir') / 'icons/hicolor/128x128/apps')
 
 desktop_utils = find_program('desktop-file-validate', required: false)
 if desktop_utils.found()

@@ -302,10 +302,16 @@ static GtkWidget *build_header(PdWindow *w)
 	GtkWidget *hb = gtk_header_bar_new();
 	GtkWidget *menu_btn = gtk_menu_button_new();
 	GMenu *menu = g_menu_new();
-	GtkWidget *title = gtk_label_new("🐧  PENGU DECK");
+	GtkWidget *title = gtk_label_new("PENGU DECK");
+	GtkWidget *brand = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 8);
+	GtkWidget *logo = gtk_image_new_from_resource(
+			"/io/github/deimen24/PenguDeck/logo.png");
 
+	gtk_image_set_pixel_size(GTK_IMAGE(logo), 28);
 	gtk_widget_add_css_class(title, "title");
-	gtk_header_bar_set_title_widget(GTK_HEADER_BAR(hb), title);
+	gtk_box_append(GTK_BOX(brand), logo);
+	gtk_box_append(GTK_BOX(brand), title);
+	gtk_header_bar_set_title_widget(GTK_HEADER_BAR(hb), brand);
 	g_menu_append(menu, "Open file…", "win.open");
 	g_menu_append(menu, "Preferences", "win.prefs");
 	g_menu_append(menu, "Keyboard shortcuts", "win.shortcuts");

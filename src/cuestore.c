@@ -97,6 +97,9 @@ bool cuestore_get(const char *key, struct track_info *info)
 	info->bpm = get_double(grp, "bpm", 0.0);
 	info->beat_offset = get_double(grp, "beat_offset", 0.0);
 	info->cue = get_double(grp, "cue", 0.0);
+	info->mkey = (int)get_double(grp, "mkey", -1.0);
+	info->has_gain = g_key_file_has_key(store, grp, "gain", NULL);
+	info->gain_db = get_double(grp, "gain", 0.0);
 	for (i = 0; i < DECK_HOTCUES; i++) {
 		g_snprintf(name, sizeof(name), "hotcue%d", i + 1);
 		info->hotcue[i] = get_double(grp, name, -1.0);
@@ -118,6 +121,10 @@ void cuestore_put(const char *key, const struct track_info *info)
 	g_key_file_set_double(store, grp, "bpm", info->bpm);
 	g_key_file_set_double(store, grp, "beat_offset", info->beat_offset);
 	g_key_file_set_double(store, grp, "cue", info->cue);
+	if (info->mkey >= 0)
+		g_key_file_set_double(store, grp, "mkey", info->mkey);
+	if (info->has_gain)
+		g_key_file_set_double(store, grp, "gain", info->gain_db);
 	for (i = 0; i < DECK_HOTCUES; i++) {
 		g_snprintf(name, sizeof(name), "hotcue%d", i + 1);
 		if (info->hotcue[i] >= 0.0)
@@ -137,4 +144,11 @@ double cuestore_bpm(const char *key)
 	struct track_info info;
 
 	return cuestore_get(key, &info) ? info.bpm : 0.0;
+}
+
+int cuestore_key(const char *key)
+{
+	struct track_info info;
+
+	return cuestore_get(key, &info) ? info.mkey : -1;
 }

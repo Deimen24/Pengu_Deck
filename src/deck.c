@@ -191,6 +191,8 @@ static void read_varispeed(struct deck *d, const struct track *t,
 		p += rate;
 		if (loop && rate > 0.0 && p >= lout && p - rate < lout)
 			p -= lout - lin;
+		else if (loop && rate < 0.0 && p < lin && p - rate >= lin)
+			p += lout - lin;
 		if (p < 0.0)
 			p = 0.0;
 	}
@@ -225,11 +227,10 @@ static void keylock_prime(struct deck *d, float scale)
  * inverse ratio, so the tempo changes but the key does not.
  */
 static bool keylock_render(struct deck *d, const struct track *t,
-			   double *pos, double rate, double tempo,
+			   double *pos, double rate, float scale,
 			   unsigned int n)
 {
 	struct rb_state *s = d->rb;
-	float scale = (float)(1.0 / tempo);
 	int guard = 64;
 
 	if (!s)
@@ -327,7 +328,7 @@ static void update_filter(struct deck *d)
 
 static void channel_strip(struct deck *d, float *out, unsigned int n)
 {
-	float trim = db_to_gain(atomic_load(&d->trim_db));
+	float trim = db_to_gain(atomic_load(&d->trim_db) + d->gain_db);
 	float pl = 0.0f, pr = 0.0f;
 	unsigned int i;
 	int b;
@@ -376,21 +377,64 @@ static void apply_fade(struct deck *d, bool on, unsigned int n)
 	}
 }
 
+/* Pitch scale for Rubber Band: keylock undoes the tempo, key shift adds. */
+static float pitch_scale(struct deck *d, double tempo)
+{
+	double scale = 1.0;
+	int ks = atomic_load(&d->key_shift);
+
+	if (atomic_load(&d->keylock) && fabs(tempo - 1.0) > 1e-4)
+		scale /= tempo;
+	if (ks)
+		scale *= pow(2.0, ks / 12.0);
+	return (float)scale;
+}
+
+/*
+ * Slip: while a loop, scratch or reverse plays with slip enabled, the
+ * position the track would have reached keeps advancing underneath and
+ * playback jumps there once the action ends.
+ */
+static void apply_slip(struct deck *d, double *pos, double start,
+		       double nominal, bool playing, bool acting,
+		       unsigned int n)
+{
+	bool slipping = acting && (atomic_load(&d->slip) ||
+				   atomic_load(&d->roll));
+
+	if (slipping) {
+		if (!d->was_slipping)
+			d->slip_pos = start;
+		if (playing)
+			d->slip_pos += nominal * n;
+	} else if (d->was_slipping) {
+		*pos = d->slip_pos;
+		if (d->rb)
+			d->rb->active = false;
+	}
+	d->was_slipping = slipping;
+}
+
 static void render_track(struct deck *d, struct track *t, unsigned int n)
 {
-	double pos = atomic_load(&d->pos);
+	double pos = atomic_load(&d->pos), start;
 	double seek = atomic_exchange(&d->seek, DECK_NO_SEEK);
 	bool playing = atomic_load(&d->playing);
 	bool scratch = atomic_load(&d->scratch);
+	bool reverse = atomic_load(&d->reverse);
 	double tempo = 1.0 + atomic_load(&d->pitch) + atomic_load(&d->bend);
 	double base = (double)t->rate / d->out_rate;
+	double rate = base * tempo * (reverse ? -1.0 : 1.0);
+	float scale = pitch_scale(d, tempo);
 	bool locked = false;
 
 	if (seek != DECK_NO_SEEK) {
 		pos = seek;
+		d->was_slipping = false;
 		if (d->rb)
 			d->rb->active = false;
 	}
+	start = pos;
 
 	if (scratch) {
 		double want = (atomic_load(&d->scratch_target) - pos) / n;
@@ -405,7 +449,8 @@ static void render_track(struct deck *d, struct track *t, unsigned int n)
 		if (d->rb)
 			d->rb->active = false;
 		d->fade = 1.0f;
-		goto out;
+		playing = d->was_slipping ? true : playing;
+		goto slip;
 	}
 
 	if (!playing && d->fade <= 0.0f) {
@@ -413,20 +458,22 @@ static void render_track(struct deck *d, struct track *t, unsigned int n)
 		memset(d->tmp[1], 0, n * sizeof(float));
 		if (d->rb)
 			d->rb->active = false;
-		goto out;
+		goto slip;
 	}
 
 #ifdef HAVE_RUBBERBAND
-	if (atomic_load(&d->keylock) && fabs(tempo - 1.0) > 1e-4)
-		locked = keylock_render(d, t, &pos, base * tempo, tempo, n);
+	if (fabsf(scale - 1.0f) > 1e-4f)
+		locked = keylock_render(d, t, &pos, rate, scale, n);
 	else if (d->rb)
 		d->rb->active = false;
 #endif
 	if (!locked)
-		read_varispeed(d, t, &pos, base * tempo, d->tmp[0], d->tmp[1],
-			       n);
+		read_varispeed(d, t, &pos, rate, d->tmp[0], d->tmp[1], n);
 	apply_fade(d, playing, n);
-out:
+
+slip:
+	apply_slip(d, &pos, start, base * tempo, playing,
+		   scratch || reverse || atomic_load(&d->loop_on), n);
 	/* Do not clobber a seek that arrived while rendering. */
 	if (atomic_load(&d->seek) == DECK_NO_SEEK)
 		atomic_store(&d->pos, pos);
@@ -442,6 +489,9 @@ void deck_render(struct deck *d, float *out, unsigned int n)
 	}
 	atomic_store(&d->in_use, 1);
 	t = atomic_load(&d->track);
+	d->gain_db = t && atomic_load(&d->autogain) &&
+		     atomic_load(&t->gain_known) ? atomic_load(&t->gain_db) :
+		     0.0f;
 	if (t && track_frames(t) > 0) {
 		render_track(d, t, n);
 	} else {
@@ -454,6 +504,10 @@ void deck_render(struct deck *d, float *out, unsigned int n)
 
 /* ---- main thread ------------------------------------------------- */
 
+static double beat_len(struct track *t);
+static double snap_to_beat(struct track *t, double pos);
+static double marker_pos(struct deck *d);
+
 void deck_load(struct deck *d, struct track *t)
 {
 	struct track *old;
@@ -461,6 +515,9 @@ void deck_load(struct deck *d, struct track *t)
 
 	atomic_store(&d->playing, false);
 	atomic_store(&d->scratch, false);
+	atomic_store(&d->reverse, false);
+	atomic_store(&d->roll, false);
+	atomic_store(&d->key_shift, 0);
 	atomic_store(&d->loop_on, false);
 	atomic_store(&d->loop_in, 0.0);
 	atomic_store(&d->loop_out, 0.0);
@@ -542,7 +599,7 @@ void deck_cue_press(struct deck *d)
 		return;
 	}
 	if (!at_cue(d, t)) {
-		d->cue = deck_position(d);
+		d->cue = marker_pos(d);
 		return;
 	}
 	d->cue_preview = true;
@@ -563,7 +620,7 @@ void deck_hotcue(struct deck *d, int i)
 	if (!deck_track(d) || i < 0 || i >= DECK_HOTCUES)
 		return;
 	if (d->hotcue[i] < 0.0) {
-		d->hotcue[i] = deck_position(d);
+		d->hotcue[i] = marker_pos(d);
 		return;
 	}
 	d->cue_preview = false;
@@ -593,6 +650,17 @@ static double snap_to_beat(struct track *t, double pos)
 	return off + round((pos - off) / b) * b;
 }
 
+/* Position for a new marker: on the beat when quantize is on. */
+static double marker_pos(struct deck *d)
+{
+	struct track *t = deck_track(d);
+	double pos = deck_position(d);
+
+	if (t && atomic_load(&d->quantize))
+		pos = snap_to_beat(t, pos);
+	return pos < 0.0 ? 0.0 : pos;
+}
+
 void deck_loop_beats(struct deck *d, double beats)
 {
 	struct track *t = deck_track(d);
@@ -618,13 +686,13 @@ void deck_loop_set_in(struct deck *d)
 	if (!deck_track(d))
 		return;
 	atomic_store(&d->loop_on, false);
-	atomic_store(&d->loop_in, deck_position(d));
+	atomic_store(&d->loop_in, marker_pos(d));
 	atomic_store(&d->loop_out, 0.0);
 }
 
 void deck_loop_set_out(struct deck *d)
 {
-	double pos = deck_position(d);
+	double pos = marker_pos(d);
 
 	if (!deck_track(d) || pos <= atomic_load(&d->loop_in))
 		return;
@@ -660,6 +728,83 @@ void deck_loop_scale(struct deck *d, double factor)
 		return;
 	d->loop_beats *= factor;
 	atomic_store(&d->loop_out, in + len);
+}
+
+void deck_beat_jump(struct deck *d, double beats)
+{
+	struct track *t = deck_track(d);
+	double pos;
+
+	if (!t)
+		return;
+	pos = deck_position(d) + beats * beat_len(t);
+	if (atomic_load(&d->quantize))
+		pos = snap_to_beat(t, pos);
+	deck_seek(d, pos);
+}
+
+void deck_roll_start(struct deck *d, double beats)
+{
+	if (!deck_track(d))
+		return;
+	atomic_store(&d->roll, true);
+	deck_loop_beats(d, beats);
+}
+
+void deck_roll_end(struct deck *d)
+{
+	/* Clearing both at once makes the audio thread jump back. */
+	atomic_store(&d->loop_on, false);
+	atomic_store(&d->roll, false);
+}
+
+void deck_censor(struct deck *d, bool on)
+{
+	if (!deck_track(d))
+		return;
+	if (on) {
+		atomic_store(&d->roll, true);
+		atomic_store(&d->reverse, true);
+	} else {
+		atomic_store(&d->reverse, false);
+		atomic_store(&d->roll, false);
+	}
+}
+
+void deck_grid_set_downbeat(struct deck *d)
+{
+	struct track *t = deck_track(d);
+
+	if (t)
+		atomic_store(&t->beat_offset, deck_position(d));
+}
+
+void deck_grid_nudge(struct deck *d, double seconds)
+{
+	struct track *t = deck_track(d);
+
+	if (t)
+		atomic_store(&t->beat_offset,
+			     atomic_load(&t->beat_offset) + seconds * t->rate);
+}
+
+void deck_grid_scale_bpm(struct deck *d, double factor)
+{
+	struct track *t = deck_track(d);
+	double bpm = t ? atomic_load(&t->bpm) : 0.0;
+
+	if (bpm > 0.0)
+		atomic_store(&t->bpm, bpm * factor);
+}
+
+void deck_grid_set_bpm(struct deck *d, double bpm)
+{
+	struct track *t = deck_track(d);
+
+	if (t && bpm > 0.0) {
+		atomic_store(&t->bpm, bpm);
+		atomic_store(&t->analysed, true);
+	}
 }
 
 double deck_rate(struct deck *d)

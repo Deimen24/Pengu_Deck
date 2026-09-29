@@ -2,5 +2,6 @@
 <gresources>
   <gresource prefix="/io/github/deimen24/PenguDeck">
     <file compressed="true">style.css</file>
+    <file>logo.png</file>
   </gresource>
 </gresources>

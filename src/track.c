@@ -48,6 +48,7 @@ struct track *track_new(const char *uri, const char *key, unsigned int rate)
 	t->rate = rate;
 	g_mutex_init(&t->lock);
 	atomic_init(&t->state, TRACK_LOADING);
+	atomic_init(&t->mkey, -1);
 	return t;
 }
 

@@ -47,6 +47,13 @@ struct deck {
 	_Atomic float pitch;		/* tempo change, 0.08 = +8% */
 	_Atomic float bend;		/* temporary nudge */
 	atomic_bool keylock;
+	atomic_int key_shift;		/* semitones, needs Rubber Band */
+	atomic_bool reverse;
+	atomic_bool slip;		/* slip mode switch */
+	atomic_bool roll;		/* momentary slip: loop roll, censor */
+	atomic_bool quantize;
+	atomic_bool autogain;
+	atomic_bool sync_lock;
 	atomic_bool scratch;
 	_Atomic double scratch_target;
 
@@ -80,6 +87,9 @@ struct deck {
 	float flt_cur;
 	float fade;
 	double scr_rate;
+	double slip_pos;		/* where playback would be without slip */
+	bool was_slipping;
+	float gain_db;			/* auto gain applied this block */
 	struct rb_state *rb;
 	float *tmp[2];
 };
@@ -108,6 +118,17 @@ void deck_loop_set_in(struct deck *d);
 void deck_loop_set_out(struct deck *d);
 void deck_loop_toggle(struct deck *d);
 void deck_loop_scale(struct deck *d, double factor);
+void deck_beat_jump(struct deck *d, double beats);
+/* Momentary loop that slips: the track keeps running underneath. */
+void deck_roll_start(struct deck *d, double beats);
+void deck_roll_end(struct deck *d);
+/* Momentary reverse with slip. */
+void deck_censor(struct deck *d, bool on);
+/* Beat grid editing, positions in frames. */
+void deck_grid_set_downbeat(struct deck *d);
+void deck_grid_nudge(struct deck *d, double seconds);
+void deck_grid_scale_bpm(struct deck *d, double factor);
+void deck_grid_set_bpm(struct deck *d, double bpm);
 double deck_rate(struct deck *d);
 double deck_bpm(struct deck *d);
 double deck_sync_pitch(struct deck *d, struct deck *master);

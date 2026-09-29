@@ -65,6 +65,9 @@ struct track {
 	_Atomic double bpm;		/* 0 when unknown */
 	_Atomic double beat_offset;	/* frame of the first beat */
 	atomic_bool analysed;		/* bpm came from cache or analysis */
+	atomic_int mkey;		/* musical key, see analyze.h, -1 unknown */
+	_Atomic float gain_db;		/* replay gain to reach the target */
+	atomic_bool gain_known;
 
 	struct wave_state *ws;		/* decoder private */
 };

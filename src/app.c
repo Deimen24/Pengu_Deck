@@ -154,6 +154,9 @@ void app_save_cues(struct app *a, int idx)
 	info.bpm = atomic_load(&t->bpm);
 	info.beat_offset = atomic_load(&t->beat_offset) / t->rate;
 	info.cue = d->cue / t->rate;
+	info.mkey = atomic_load(&t->mkey);
+	info.has_gain = atomic_load(&t->gain_known);
+	info.gain_db = atomic_load(&t->gain_db);
 	for (i = 0; i < DECK_HOTCUES; i++)
 		info.hotcue[i] = d->hotcue[i] >= 0.0 ?
 				 d->hotcue[i] / t->rate : -1.0;
@@ -171,6 +174,12 @@ static void restore_cues(struct deck *d, struct track *t)
 		atomic_store(&t->bpm, info.bpm);
 		atomic_store(&t->beat_offset, info.beat_offset * t->rate);
 		atomic_store(&t->analysed, true);
+	}
+	if (info.mkey >= 0)
+		atomic_store(&t->mkey, info.mkey);
+	if (info.has_gain) {
+		atomic_store(&t->gain_db, (float)info.gain_db);
+		atomic_store(&t->gain_known, true);
 	}
 	d->cue = info.cue * t->rate;
 	for (i = 0; i < DECK_HOTCUES; i++)
@@ -195,6 +204,8 @@ static void load_uri(struct app *a, int idx, const char *uri,
 	track_set_meta(t, title, artist);
 	deck_load(d, t);
 	atomic_store(&d->keylock, a->cfg.keylock && deck_has_keylock());
+	atomic_store(&d->quantize, a->cfg.quantize);
+	atomic_store(&d->autogain, a->cfg.autogain);
 	restore_cues(d, t);
 	if (!atomic_load(&t->analysed) && tag_bpm > 0.0) {
 		/* Keep the tag tempo, still analyse to find the grid. */

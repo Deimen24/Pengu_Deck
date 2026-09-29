@@ -3,13 +3,15 @@
  * deckview.c - one deck panel
  */
 #include <math.h>
+#include <string.h>
 
+#include "analyze.h"
 #include "cuestore.h"
 #include "deckview.h"
 #include "platter.h"
 #include "waveform.h"
 
-#define PLATTER_SIZE	100
+#define PLATTER_SIZE	92
 
 #define BEND_AMOUNT	0.04f
 
@@ -29,7 +31,14 @@ struct _PdDeckView {
 	GtkWidget *play;
 	GtkWidget *cue;
 	GtkWidget *keylock;
+	GtkWidget *sync;
+	GtkWidget *quant;
+	GtkWidget *rev;
+	GtkWidget *slip;
+	GtkWidget *key;
 	GtkWidget *loop;
+	gint64 taps[8];
+	int ntaps;
 	GtkWidget *hotcue[DECK_HOTCUES];
 	GtkWidget *pitch;
 	GtkWidget *pitch_label;
@@ -132,6 +141,10 @@ static void set_status(PdDeckView *v, struct track *t)
 	g_free(err);
 }
 
+static gboolean do_sync(PdDeckView *v, gboolean phase, gboolean loud);
+static void sync_toggle(PdDeckView *v, GtkWidget *b, atomic_bool *flag);
+static void set_key_label(PdDeckView *v, struct track *t);
+
 static gboolean tick(GtkWidget *w, GdkFrameClock *clock, gpointer data)
 {
 	PdDeckView *v = PD_DECK_VIEW(w);
@@ -163,6 +176,13 @@ static gboolean tick(GtkWidget *w, GdkFrameClock *clock, gpointer data)
 	    atomic_load(&v->deck->loop_on))
 		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(v->loop),
 					     atomic_load(&v->deck->loop_on));
+	sync_toggle(v, v->sync, &v->deck->sync_lock);
+	sync_toggle(v, v->quant, &v->deck->quantize);
+	sync_toggle(v, v->rev, &v->deck->reverse);
+	sync_toggle(v, v->slip, &v->deck->slip);
+	if (atomic_load(&v->deck->sync_lock) && !do_sync(v, FALSE, FALSE))
+		atomic_store(&v->deck->sync_lock, false);
+	set_key_label(v, t);
 	for (i = 0; i < DECK_HOTCUES; i++) {
 		if (v->deck->hotcue[i] >= 0.0)
 			gtk_widget_add_css_class(v->hotcue[i], "set");
@@ -220,7 +240,8 @@ static void on_cue_release(GtkGestureClick *g, int n, double x, double y,
 	deck_cue_release(v->deck);
 }
 
-static void on_sync(GtkButton *b, PdDeckView *v)
+/* One shot sync; returns false when it is not possible. */
+static gboolean do_sync(PdDeckView *v, gboolean phase, gboolean loud)
 {
 	struct deck *master = &v->app->engine.deck[app_sync_master(v->app,
 								   v->idx)];
@@ -228,17 +249,275 @@ static void on_sync(GtkButton *b, PdDeckView *v)
 	double range = v->app->cfg.pitch_range / 100.0;
 
 	if (isnan(p)) {
-		app_toast(v->app, "Sync needs a tempo on this and another "
-			  "deck");
-		return;
+		if (loud)
+			app_toast(v->app, "Sync needs a tempo on this and "
+				  "another deck");
+		return FALSE;
 	}
 	if (fabs(p) > range) {
-		app_toast(v->app, "Sync needs %+.1f%%, outside the ±%d%% "
-			  "pitch range", p * 100.0, v->app->cfg.pitch_range);
+		if (loud)
+			app_toast(v->app, "Sync needs %+.1f%%, outside the "
+				  "±%d%% pitch range", p * 100.0,
+				  v->app->cfg.pitch_range);
+		return FALSE;
+	}
+	if (fabs(p - atomic_load(&v->deck->pitch)) > 1e-4)
+		gtk_range_set_value(GTK_RANGE(v->pitch), p * 100.0);
+	if (phase)
+		deck_sync_phase(v->deck, master);
+	return TRUE;
+}
+
+/* SYNC toggled on locks the tempo to the master until switched off. */
+static void on_sync_lock(GtkToggleButton *b, PdDeckView *v)
+{
+	gboolean on = gtk_toggle_button_get_active(b);
+
+	if (v->updating)
+		return;
+	if (on && !do_sync(v, TRUE, TRUE)) {
+		v->updating = TRUE;
+		gtk_toggle_button_set_active(b, FALSE);
+		v->updating = FALSE;
 		return;
 	}
-	gtk_range_set_value(GTK_RANGE(v->pitch), p * 100.0);
-	deck_sync_phase(v->deck, master);
+	atomic_store(&v->deck->sync_lock, on);
+}
+
+static void on_flag(GtkToggleButton *b, gpointer data)
+{
+	atomic_bool *flag = data;
+	PdDeckView *v = g_object_get_data(G_OBJECT(b), "view");
+
+	if (!v->updating)
+		atomic_store(flag, gtk_toggle_button_get_active(b));
+}
+
+static GtkWidget *flag_toggle(PdDeckView *v, const char *label,
+			      const char *tip, atomic_bool *flag,
+			      const char *css)
+{
+	GtkWidget *b = toggle(label, css);
+
+	gtk_widget_set_tooltip_text(b, tip);
+	g_object_set_data(G_OBJECT(b), "view", v);
+	g_signal_connect(b, "toggled", G_CALLBACK(on_flag), flag);
+	return b;
+}
+
+static void sync_toggle(PdDeckView *v, GtkWidget *b, atomic_bool *flag)
+{
+	gboolean want = atomic_load(flag);
+
+	if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(b)) != want)
+		gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(b), want);
+}
+
+static void on_key_shift(GtkButton *b, gpointer data)
+{
+	PdDeckView *v = g_object_get_data(G_OBJECT(b), "view");
+	int ks = atomic_load(&v->deck->key_shift) + GPOINTER_TO_INT(data);
+
+	atomic_store(&v->deck->key_shift, CLAMP(ks, -12, 12));
+}
+
+static void on_key_reset(GtkGestureClick *g, int n, double x, double y,
+			 PdDeckView *v)
+{
+	atomic_store(&v->deck->key_shift, 0);
+}
+
+static void set_key_label(PdDeckView *v, struct track *t)
+{
+	int k = t ? atomic_load(&t->mkey) : -1;
+	int ks = atomic_load(&v->deck->key_shift);
+	char *s;
+
+	if (k >= 0 && ks)
+		k = (k / 12) * 12 + ((k % 12 + ks) % 12 + 12) % 12;
+	if (k >= 0)
+		s = g_strdup_printf("%s %s%s%+d", key_camelot(k), key_name(k),
+				    ks ? " " : "", ks);
+	else
+		s = g_strdup(t && !atomic_load(&t->analysed) ? "…" : "–");
+	if (!ks && k >= 0) {
+		g_free(s);
+		s = g_strdup_printf("%s %s", key_camelot(k), key_name(k));
+	}
+	gtk_label_set_text(GTK_LABEL(v->key), s);
+	g_free(s);
+}
+
+static void on_jump(GtkButton *b, gpointer data)
+{
+	PdDeckView *v = g_object_get_data(G_OBJECT(b), "view");
+
+	deck_beat_jump(v->deck, GPOINTER_TO_INT(data) * v->deck->loop_beats);
+}
+
+static void roll_press(GtkGestureClick *g, int n, double x, double y,
+		       gpointer data)
+{
+	PdDeckView *v = g_object_get_data(G_OBJECT(g), "view");
+
+	deck_roll_start(v->deck, GPOINTER_TO_INT(data) / 8.0);
+}
+
+static void roll_release(GtkGestureClick *g, int n, double x, double y,
+			 gpointer data)
+{
+	PdDeckView *v = g_object_get_data(G_OBJECT(g), "view");
+
+	deck_roll_end(v->deck);
+}
+
+static void censor_press(GtkGestureClick *g, int n, double x, double y,
+			 PdDeckView *v)
+{
+	deck_censor(v->deck, true);
+}
+
+static void censor_release(GtkGestureClick *g, int n, double x, double y,
+			   PdDeckView *v)
+{
+	deck_censor(v->deck, false);
+}
+
+/* ---- beat grid popover ------------------------------------------- */
+
+static void grid_changed(PdDeckView *v)
+{
+	app_save_cues(v->app, v->idx);
+}
+
+static void on_tap(GtkButton *b, PdDeckView *v)
+{
+	gint64 now = g_get_monotonic_time();
+	double sum = 0.0;
+	int i, n;
+
+	/* A pause of two seconds starts a new tap sequence. */
+	if (v->ntaps && now - v->taps[v->ntaps - 1] > 2 * G_USEC_PER_SEC)
+		v->ntaps = 0;
+	if (v->ntaps == (int)G_N_ELEMENTS(v->taps)) {
+		memmove(v->taps, v->taps + 1, sizeof(v->taps) - sizeof(gint64));
+		v->ntaps--;
+	}
+	v->taps[v->ntaps++] = now;
+	if (v->ntaps < 3)
+		return;
+	n = v->ntaps - 1;
+	for (i = 0; i < n; i++)
+		sum += (double)(v->taps[i + 1] - v->taps[i]);
+	deck_grid_set_bpm(v->deck, 60.0 * G_USEC_PER_SEC / (sum / n));
+	if (v->ntaps == 3)
+		deck_grid_set_downbeat(v->deck);
+	grid_changed(v);
+}
+
+static void on_downbeat(GtkButton *b, PdDeckView *v)
+{
+	deck_grid_set_downbeat(v->deck);
+	grid_changed(v);
+}
+
+static void on_grid_nudge(GtkButton *b, gpointer data)
+{
+	PdDeckView *v = g_object_get_data(G_OBJECT(b), "view");
+
+	deck_grid_nudge(v->deck, GPOINTER_TO_INT(data) / 1000.0);
+	grid_changed(v);
+}
+
+static void on_grid_scale(GtkButton *b, gpointer data)
+{
+	PdDeckView *v = g_object_get_data(G_OBJECT(b), "view");
+
+	deck_grid_scale_bpm(v->deck, GPOINTER_TO_INT(data) > 0 ? 2.0 : 0.5);
+	grid_changed(v);
+}
+
+static gpointer reanalyse_thread(gpointer data)
+{
+	struct track *t = data;
+	double bpm, offset;
+
+	if (analyze_tempo(t, &bpm, &offset) == 0) {
+		atomic_store(&t->beat_offset, offset);
+		atomic_store(&t->bpm, bpm);
+	}
+	atomic_store(&t->mkey, analyze_key(t));
+	atomic_store(&t->analysed, true);
+	track_unref(t);
+	return NULL;
+}
+
+static void on_reanalyse(GtkButton *b, PdDeckView *v)
+{
+	struct track *t = deck_track(v->deck);
+
+	if (!t || !track_done(t))
+		return;
+	atomic_store(&t->analysed, false);
+	v->saved_for = NULL;	/* the tick saves the fresh result */
+	g_thread_unref(g_thread_new("pd-reanalyse", reanalyse_thread,
+				    track_ref(t)));
+}
+
+static GtkWidget *grid_button(PdDeckView *v, const char *label,
+			      const char *tip, GCallback cb, gpointer data)
+{
+	GtkWidget *b = gtk_button_new_with_label(label);
+
+	gtk_widget_set_tooltip_text(b, tip);
+	g_object_set_data(G_OBJECT(b), "view", v);
+	g_signal_connect(b, "clicked", cb, data);
+	return b;
+}
+
+static GtkWidget *build_grid_menu(PdDeckView *v)
+{
+	GtkWidget *mb = gtk_menu_button_new();
+	GtkWidget *pop = gtk_popover_new();
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
+	GtkWidget *row, *l;
+
+	gtk_menu_button_set_child(GTK_MENU_BUTTON(mb), gtk_label_new("GRID"));
+	gtk_widget_add_css_class(mb, "grid-button");
+	gtk_widget_set_tooltip_text(mb, "Edit the beat grid");
+
+	l = gtk_label_new("BEAT GRID");
+	gtk_widget_add_css_class(l, "section-label");
+	gtk_box_append(GTK_BOX(box), l);
+	row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+	gtk_box_append(GTK_BOX(row), grid_button(v, "TAP", "Tap the tempo "
+			"(3+ taps); the first tap sets the downbeat",
+			G_CALLBACK(on_tap), v));
+	gtk_box_append(GTK_BOX(row), grid_button(v, "Set downbeat",
+			"Move the grid so a beat sits at the play head",
+			G_CALLBACK(on_downbeat), v));
+	gtk_box_append(GTK_BOX(box), row);
+	row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+	gtk_box_append(GTK_BOX(row), grid_button(v, "◀ 10 ms", "Nudge the "
+			"grid earlier", G_CALLBACK(on_grid_nudge),
+			GINT_TO_POINTER(-10)));
+	gtk_box_append(GTK_BOX(row), grid_button(v, "10 ms ▶", "Nudge the "
+			"grid later", G_CALLBACK(on_grid_nudge),
+			GINT_TO_POINTER(10)));
+	gtk_box_append(GTK_BOX(box), row);
+	row = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+	gtk_box_append(GTK_BOX(row), grid_button(v, "BPM ÷ 2", "Halve the "
+			"tempo", G_CALLBACK(on_grid_scale),
+			GINT_TO_POINTER(-1)));
+	gtk_box_append(GTK_BOX(row), grid_button(v, "BPM × 2", "Double the "
+			"tempo", G_CALLBACK(on_grid_scale), GINT_TO_POINTER(1)));
+	gtk_box_append(GTK_BOX(box), row);
+	gtk_box_append(GTK_BOX(box), grid_button(v, "Re-analyse",
+			"Detect tempo, grid and key again",
+			G_CALLBACK(on_reanalyse), v));
+	gtk_popover_set_child(GTK_POPOVER(pop), box);
+	gtk_menu_button_set_popover(GTK_MENU_BUTTON(mb), pop);
+	return mb;
 }
 
 static void on_keylock(GtkToggleButton *b, PdDeckView *v)
@@ -386,8 +665,21 @@ static GtkWidget *build_header(PdDeckView *v)
 	gtk_grid_attach(GTK_GRID(grid), badge, 0, 0, 1, 2);
 	gtk_grid_attach(GTK_GRID(grid), v->title, 1, 0, 1, 1);
 	gtk_grid_attach(GTK_GRID(grid), v->artist, 1, 1, 1, 1);
+	v->key = gtk_label_new("–");
+	gtk_widget_add_css_class(v->key, "readout");
+	gtk_widget_add_css_class(v->key, "key-readout");
+	gtk_widget_set_tooltip_text(v->key, "Musical key (Camelot); click "
+				    "to reset the key shift");
+	gtk_widget_set_valign(v->key, GTK_ALIGN_CENTER);
+	{
+		GtkGesture *g = gtk_gesture_click_new();
+
+		g_signal_connect(g, "pressed", G_CALLBACK(on_key_reset), v);
+		gtk_widget_add_controller(v->key, GTK_EVENT_CONTROLLER(g));
+	}
 	gtk_grid_attach(GTK_GRID(grid), v->bpm, 2, 0, 1, 1);
 	gtk_grid_attach(GTK_GRID(grid), v->time, 2, 1, 1, 1);
+	gtk_grid_attach(GTK_GRID(grid), v->key, 3, 0, 1, 2);
 	gtk_grid_attach(GTK_GRID(grid), v->status, 1, 2, 2, 1);
 	return grid;
 }
@@ -400,14 +692,11 @@ static GtkWidget *build_loops(PdDeckView *v)
 	} sizes[] = {
 		{ "½", 2 }, { "1", 4 }, { "2", 8 }, { "4", 16 }, { "8", 32 },
 	};
-	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 	GtkWidget *group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
 	GtkWidget *b;
 	size_t i;
 
-	b = gtk_label_new("LOOP");
-	gtk_widget_add_css_class(b, "section-label");
-	gtk_box_append(GTK_BOX(box), b);
 	gtk_widget_add_css_class(group, "linked");
 	for (i = 0; i < G_N_ELEMENTS(sizes); i++) {
 		b = button(sizes[i].label, "loop-size");
@@ -427,18 +716,56 @@ static GtkWidget *build_loops(PdDeckView *v)
 	g_signal_connect(b, "clicked", G_CALLBACK(on_loop_double), v);
 	gtk_box_append(GTK_BOX(group), b);
 	gtk_box_append(GTK_BOX(box), group);
+
+	{
+		static const struct {
+			const char *label;
+			int eighths;
+		} rolls[] = {
+			{ "⅛", 1 }, { "¼", 2 }, { "½", 4 }, { "1", 8 },
+		};
+		GtkGesture *g;
+
+		group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+		gtk_widget_set_margin_start(group, 6);
+		gtk_widget_add_css_class(group, "linked");
+		for (i = 0; i < G_N_ELEMENTS(rolls); i++) {
+			b = button(rolls[i].label, "roll");
+			gtk_widget_set_tooltip_text(b, "Hold for a loop roll; "
+						    "the track keeps running "
+						    "underneath");
+			g = gtk_gesture_click_new();
+			g_object_set_data(G_OBJECT(g), "view", v);
+			g_signal_connect(g, "pressed", G_CALLBACK(roll_press),
+					 GINT_TO_POINTER(rolls[i].eighths));
+			g_signal_connect(g, "released",
+					 G_CALLBACK(roll_release), NULL);
+			g_signal_connect(g, "cancel",
+					 G_CALLBACK(roll_release), NULL);
+			gtk_widget_add_controller(b, GTK_EVENT_CONTROLLER(g));
+			gtk_box_append(GTK_BOX(group), b);
+		}
+		gtk_box_append(GTK_BOX(box), group);
+
+		b = button("CENSOR", "censor");
+		gtk_widget_set_tooltip_text(b, "Hold to play backwards "
+					    "(bleep), release to slip back");
+		g = gtk_gesture_click_new();
+		g_signal_connect(g, "pressed", G_CALLBACK(censor_press), v);
+		g_signal_connect(g, "released", G_CALLBACK(censor_release), v);
+		g_signal_connect(g, "cancel", G_CALLBACK(censor_release), v);
+		gtk_widget_add_controller(b, GTK_EVENT_CONTROLLER(g));
+		gtk_box_append(GTK_BOX(box), b);
+	}
 	return box;
 }
 
 static GtkWidget *build_hotcues(PdDeckView *v)
 {
-	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 3);
 	GtkWidget *b;
 	int i;
 
-	b = gtk_label_new("CUES");
-	gtk_widget_add_css_class(b, "section-label");
-	gtk_box_append(GTK_BOX(box), b);
 	for (i = 0; i < DECK_HOTCUES; i++) {
 		char label[4];
 		GtkGesture *g = gtk_gesture_click_new();
@@ -458,7 +785,7 @@ static GtkWidget *build_hotcues(PdDeckView *v)
 	}
 
 	b = button("In", NULL);
-	gtk_widget_set_margin_start(b, 12);
+	gtk_widget_set_margin_start(b, 6);
 	gtk_widget_set_tooltip_text(b, "Manual loop in point");
 	g_signal_connect(b, "clicked", G_CALLBACK(on_loop_in), v);
 	gtk_box_append(GTK_BOX(box), b);
@@ -471,6 +798,7 @@ static GtkWidget *build_hotcues(PdDeckView *v)
 	gtk_widget_set_tooltip_text(v->loop, "Loop on/off (reloop)");
 	g_signal_connect(v->loop, "toggled", G_CALLBACK(on_loop_toggle), v);
 	gtk_box_append(GTK_BOX(box), v->loop);
+
 	return box;
 }
 
@@ -492,8 +820,7 @@ static GtkWidget *bend_button(PdDeckView *v, const char *label, int dir)
 
 static GtkWidget *build_transport(PdDeckView *v)
 {
-	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 6);
-	GtkWidget *b;
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
 	GtkGesture *g;
 
 	v->cue = button("CUE", "cue-button");
@@ -513,12 +840,13 @@ static GtkWidget *build_transport(PdDeckView *v)
 	gtk_box_append(GTK_BOX(box), bend_button(v, "◀", -1));
 	gtk_box_append(GTK_BOX(box), bend_button(v, "▶", 1));
 
-	b = button("SYNC", "sync-button");
-	gtk_widget_set_tooltip_text(b, "Match tempo and beat phase to the "
-				    "other deck");
-	g_signal_connect(b, "clicked", G_CALLBACK(on_sync), v);
-	gtk_widget_set_margin_start(b, 10);
-	gtk_box_append(GTK_BOX(box), b);
+	v->sync = toggle("SYNC", "sync-button");
+	gtk_widget_set_tooltip_text(v->sync, "Sync lock: match tempo and "
+				    "beat phase to the master deck and follow "
+				    "it; click again to release");
+	g_signal_connect(v->sync, "toggled", G_CALLBACK(on_sync_lock), v);
+	gtk_widget_set_margin_start(v->sync, 8);
+	gtk_box_append(GTK_BOX(box), v->sync);
 
 	v->keylock = toggle("KEY", NULL);
 	gtk_widget_set_tooltip_text(v->keylock, "Keylock: change tempo "
@@ -527,6 +855,66 @@ static GtkWidget *build_transport(PdDeckView *v)
 	g_signal_connect(v->keylock, "toggled", G_CALLBACK(on_keylock), v);
 	gtk_box_append(GTK_BOX(box), v->keylock);
 
+	return box;
+}
+
+static GtkWidget *build_modes(PdDeckView *v)
+{
+	GtkWidget *box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 4);
+	GtkWidget *b;
+
+	v->quant = flag_toggle(v, "Q", "Quantize: cues, loops and jumps "
+			       "snap to the beat grid", &v->deck->quantize,
+			       "quant-button");
+	gtk_box_append(GTK_BOX(box), v->quant);
+	v->rev = flag_toggle(v, "REV", "Play backwards", &v->deck->reverse,
+			     "rev-button");
+	gtk_box_append(GTK_BOX(box), v->rev);
+	v->slip = flag_toggle(v, "SLIP", "Slip mode: loops, scratches and "
+			      "reverse play while the track keeps running "
+			      "underneath", &v->deck->slip, "slip-button");
+	gtk_box_append(GTK_BOX(box), v->slip);
+	{
+		GtkWidget *group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+
+		gtk_widget_add_css_class(group, "linked");
+		gtk_widget_set_margin_start(group, 6);
+		b = button("⇤", "jump");
+		gtk_widget_set_tooltip_text(b, "Beat jump back by the loop "
+					    "length");
+		g_object_set_data(G_OBJECT(b), "view", v);
+		g_signal_connect(b, "clicked", G_CALLBACK(on_jump),
+				 GINT_TO_POINTER(-1));
+		gtk_box_append(GTK_BOX(group), b);
+		b = button("⇥", "jump");
+		gtk_widget_set_tooltip_text(b, "Beat jump forward by the "
+					    "loop length");
+		g_object_set_data(G_OBJECT(b), "view", v);
+		g_signal_connect(b, "clicked", G_CALLBACK(on_jump),
+				 GINT_TO_POINTER(1));
+		gtk_box_append(GTK_BOX(group), b);
+		gtk_box_append(GTK_BOX(box), group);
+
+		group = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
+		gtk_widget_add_css_class(group, "linked");
+		gtk_widget_set_margin_start(group, 6);
+		b = button("♭", "keyshift");
+		gtk_widget_set_tooltip_text(b, "Key down one semitone");
+		g_object_set_data(G_OBJECT(b), "view", v);
+		g_signal_connect(b, "clicked", G_CALLBACK(on_key_shift),
+				 GINT_TO_POINTER(-1));
+		gtk_widget_set_sensitive(b, deck_has_keylock());
+		gtk_box_append(GTK_BOX(group), b);
+		b = button("♯", "keyshift");
+		gtk_widget_set_tooltip_text(b, "Key up one semitone");
+		g_object_set_data(G_OBJECT(b), "view", v);
+		g_signal_connect(b, "clicked", G_CALLBACK(on_key_shift),
+				 GINT_TO_POINTER(1));
+		gtk_widget_set_sensitive(b, deck_has_keylock());
+		gtk_box_append(GTK_BOX(group), b);
+		gtk_box_append(GTK_BOX(box), group);
+	}
+	gtk_box_append(GTK_BOX(box), build_grid_menu(v));
 	return box;
 }
 
@@ -612,9 +1000,10 @@ GtkWidget *pd_deck_view_new(struct app *app, int idx)
 
 	{
 		GtkWidget *bottom = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
-		GtkWidget *pads = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+		GtkWidget *pads = gtk_box_new(GTK_ORIENTATION_VERTICAL, 4);
 
 		gtk_box_append(GTK_BOX(pads), build_transport(v));
+		gtk_box_append(GTK_BOX(pads), build_modes(v));
 		gtk_box_append(GTK_BOX(pads), build_hotcues(v));
 		gtk_box_append(GTK_BOX(pads), build_loops(v));
 		gtk_widget_set_valign(pads, GTK_ALIGN_CENTER);
@@ -667,7 +1056,7 @@ void pd_deck_view_action(PdDeckView *v, const char *action, gboolean press)
 			deck_cue_release(v->deck);
 	} else if (g_str_equal(action, "sync")) {
 		if (press)
-			on_sync(NULL, v);
+			do_sync(v, TRUE, TRUE);
 	} else if (g_str_equal(action, "bend-")) {
 		atomic_store(&v->deck->bend, press ? -BEND_AMOUNT : 0.0f);
 	} else if (g_str_equal(action, "bend+")) {

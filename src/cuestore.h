@@ -16,6 +16,9 @@ struct track_info {
 	double beat_offset;	/* seconds */
 	double cue;		/* seconds */
 	double hotcue[DECK_HOTCUES];	/* seconds, < 0 when unset */
+	int mkey;		/* musical key, -1 unknown */
+	double gain_db;
+	bool has_gain;
 };
 
 void cuestore_open(void);
@@ -26,5 +29,7 @@ void cuestore_put(const char *key, const struct track_info *info);
 
 /* Stored bpm only, 0 if unknown. */
 double cuestore_bpm(const char *key);
+/* Stored musical key, -1 if unknown. */
+int cuestore_key(const char *key);
 
 #endif /* PD_CUESTORE_H */

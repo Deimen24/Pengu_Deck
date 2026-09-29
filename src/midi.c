@@ -35,6 +35,15 @@
 	{ "deck" #n ".loop_half", "Deck " L ": loop ½", MIDI_BUTTON, n }, \
 	{ "deck" #n ".loop_double", "Deck " L ": loop 2×", MIDI_BUTTON, n }, \
 	{ "deck" #n ".load", "Deck " L ": load selected", MIDI_BUTTON, n }, \
+	{ "deck" #n ".reverse", "Deck " L ": reverse", MIDI_BUTTON, n }, \
+	{ "deck" #n ".slip", "Deck " L ": slip mode", MIDI_BUTTON, n }, \
+	{ "deck" #n ".quantize", "Deck " L ": quantize", MIDI_BUTTON, n }, \
+	{ "deck" #n ".censor", "Deck " L ": censor (hold)", MIDI_BUTTON, n }, \
+	{ "deck" #n ".roll", "Deck " L ": ½ beat roll (hold)", MIDI_BUTTON, n }, \
+	{ "deck" #n ".jump_back", "Deck " L ": beat jump back", MIDI_BUTTON, n }, \
+	{ "deck" #n ".jump_fwd", "Deck " L ": beat jump forward", MIDI_BUTTON, n }, \
+	{ "deck" #n ".key_down", "Deck " L ": key -1", MIDI_BUTTON, n }, \
+	{ "deck" #n ".key_up", "Deck " L ": key +1", MIDI_BUTTON, n }, \
 	{ "deck" #n ".pfl", "Deck " L ": headphone cue", MIDI_BUTTON, n }, \
 	{ "deck" #n ".pitch", "Deck " L ": pitch fader", MIDI_ABSOLUTE, n }, \
 	{ "deck" #n ".volume", "Deck " L ": channel fader", MIDI_ABSOLUTE, n }, \
@@ -205,6 +214,38 @@ static void deck_button(int i, const char *what, bool press)
 	} else if (g_str_equal(what, "pfl")) {
 		if (press)
 			atomic_store(&d->pfl, !atomic_load(&d->pfl));
+	} else if (g_str_equal(what, "reverse")) {
+		if (press)
+			atomic_store(&d->reverse, !atomic_load(&d->reverse));
+	} else if (g_str_equal(what, "slip")) {
+		if (press)
+			atomic_store(&d->slip, !atomic_load(&d->slip));
+	} else if (g_str_equal(what, "quantize")) {
+		if (press)
+			atomic_store(&d->quantize, !atomic_load(&d->quantize));
+	} else if (g_str_equal(what, "censor")) {
+		deck_censor(d, press);
+	} else if (g_str_equal(what, "roll")) {
+		if (press)
+			deck_roll_start(d, 0.5);
+		else
+			deck_roll_end(d);
+	} else if (g_str_equal(what, "jump_back")) {
+		if (press)
+			deck_beat_jump(d, -d->loop_beats);
+	} else if (g_str_equal(what, "jump_fwd")) {
+		if (press)
+			deck_beat_jump(d, d->loop_beats);
+	} else if (g_str_equal(what, "key_down")) {
+		if (press)
+			atomic_store(&d->key_shift,
+				     CLAMP(atomic_load(&d->key_shift) - 1,
+					   -12, 12));
+	} else if (g_str_equal(what, "key_up")) {
+		if (press)
+			atomic_store(&d->key_shift,
+				     CLAMP(atomic_load(&d->key_shift) + 1,
+					   -12, 12));
 	}
 }
 

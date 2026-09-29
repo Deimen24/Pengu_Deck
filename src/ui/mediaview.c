@@ -2,6 +2,8 @@
 /*
  * mediaview.c - track list
  */
+#include "analyze.h"
+#include "cuestore.h"
 #include "mediaview.h"
 #include "sccache.h"
 
@@ -102,6 +104,7 @@ enum column {
 	COL_ALBUM,
 	COL_GENRE,
 	COL_BPM,
+	COL_KEY,
 	COL_DURATION,
 };
 
@@ -172,6 +175,14 @@ static void bind_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 		if (m->bpm > 0.0)
 			text = tmp = g_strdup_printf("%.0f", m->bpm);
 		break;
+	case COL_KEY: {
+		int k = cuestore_key(m->key);
+
+		if (k >= 0)
+			text = tmp = g_strdup_printf("%s %s", key_camelot(k),
+						     key_name(k));
+		break;
+	}
 	case COL_DURATION:
 		text = tmp = format_duration(m->duration);
 		break;
@@ -445,6 +456,7 @@ GtkWidget *pd_media_view_new(struct app *app, GListStore *store,
 		add_column(v, "Album", COL_ALBUM, STR_SORTER(album), TRUE, 0);
 	add_column(v, "Genre", COL_GENRE, STR_SORTER(genre), FALSE, 110);
 	add_column(v, "BPM", COL_BPM, NUM_SORTER(bpm), FALSE, 60);
+	add_column(v, "Key", COL_KEY, STR_SORTER(key), FALSE, 76);
 	add_column(v, "Length", COL_DURATION, NUM_SORTER(duration), FALSE,
 		   70);
 #undef STR_SORTER

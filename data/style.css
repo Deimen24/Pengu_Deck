@@ -121,8 +121,7 @@ label.deck-badge.deck-d { background: @deck-d; box-shadow: 0 0 14px alpha(@deck-
 	font-weight: 800;
 	letter-spacing: 2px;
 	color: @dim;
-	margin: 0 4px;
-	min-width: 34px;
+	margin: 0 3px;
 }
 
 .dim-label {
@@ -204,7 +203,7 @@ button:checked {
 }
 
 button.play-button {
-	min-width: 68px;
+	min-width: 60px;
 	font-size: 18px;
 	background: alpha(@play, 0.18);
 	border-color: alpha(@play, 0.6);
@@ -218,7 +217,7 @@ button.play-button:checked {
 }
 
 button.cue-button {
-	min-width: 60px;
+	min-width: 52px;
 	background: alpha(@cue, 0.18);
 	border-color: alpha(@cue, 0.6);
 	color: @cue;
@@ -242,7 +241,7 @@ button.sync-button:active {
 }
 
 deck button.pad {
-	min-width: 34px;
+	min-width: 26px;
 	min-height: 30px;
 	border-radius: 6px;
 	color: @dim;
@@ -266,8 +265,8 @@ deck button.pad:nth-child(5) { border-color: alpha(#fb7185, 0.45); }
 deck button.pad:nth-child(5).set { background: #fb7185; border-color: #fb7185; box-shadow: 0 0 12px alpha(#fb7185, 0.7); }
 
 button.loop-size {
-	min-width: 26px;
-	padding: 4px 6px;
+	min-width: 20px;
+	padding: 4px 4px;
 	color: @loop;
 	background: #1a1e27;
 	border-color: alpha(@loop, 0.4);
@@ -550,4 +549,76 @@ tooltip {
 dropdown button,
 dropdown > button {
 	font-weight: 400;
+}
+
+/* ---- stage 1 additions ------------------------------------------- */
+
+.key-readout {
+	font-size: 12px;
+	color: #c084fc;
+	min-width: 44px;
+	margin-left: 2px;
+}
+
+button.quant-button:checked { background: @deck-a; color: #06202b; }
+button.rev-button:checked { background: @rec; color: #fff; }
+button.slip-button:checked { background: #fde047; color: #1c1200; }
+button.sync-button:checked { background: @sync; color: #06202b; box-shadow: 0 0 12px alpha(@sync, 0.7); }
+
+button.quant-button,
+button.rev-button,
+button.slip-button {
+	min-width: 30px;
+	padding: 4px 6px;
+	font-size: 11px;
+}
+
+button.jump,
+button.keyshift {
+	min-width: 22px;
+	padding: 4px 5px;
+}
+
+button.keyshift {
+	color: @key;
+	border-color: alpha(@key, 0.4);
+}
+
+button.roll {
+	min-width: 20px;
+	padding: 4px 4px;
+	color: #fde047;
+	background: #1a1e27;
+	border-color: alpha(#fde047, 0.4);
+}
+
+button.roll:active {
+	background: #fde047;
+	color: #1c1200;
+}
+
+button.censor {
+	color: @rec;
+	border-color: alpha(@rec, 0.5);
+	font-size: 9px;
+	padding: 4px 4px;
+	min-width: 20px;
+}
+
+button.censor:active {
+	background: @rec;
+	color: #fff;
+}
+
+menubutton.grid-button > button {
+	font-size: 10px;
+	padding: 4px 6px;
+	color: @dim;
+}
+
+popover > contents {
+	background: @panel2;
+	border: 1px solid @line;
+	border-radius: 10px;
+	padding: 10px;
 }

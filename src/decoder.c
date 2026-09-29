@@ -234,13 +234,19 @@ static void analyse(struct track *t)
 {
 	double bpm, offset;
 
-	if (atomic_load(&t->analysed))
-		return;
-	if (analyze_tempo(t, &bpm, &offset) == 0) {
-		atomic_store(&t->beat_offset, offset);
-		atomic_store(&t->bpm, bpm);
+	if (!atomic_load(&t->analysed)) {
+		if (analyze_tempo(t, &bpm, &offset) == 0) {
+			atomic_store(&t->beat_offset, offset);
+			atomic_store(&t->bpm, bpm);
+		}
+		atomic_store(&t->analysed, true);
 	}
-	atomic_store(&t->analysed, true);
+	if (!atomic_load(&t->gain_known)) {
+		atomic_store(&t->gain_db, analyze_gain(t));
+		atomic_store(&t->gain_known, true);
+	}
+	if (atomic_load(&t->mkey) < 0 && !atomic_load(&t->cancel))
+		atomic_store(&t->mkey, analyze_key(t));
 }
 
 int decoder_run(struct track *t)

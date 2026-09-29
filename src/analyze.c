@@ -15,6 +15,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <glib.h>
+
 #include "analyze.h"
 
 #define ENV_HOP		128
@@ -235,4 +237,224 @@ int analyze_tempo(const struct track *t, double *bpm, double *offset)
 	*offset = fmod((double)first +
 		       (phase + 0.5) * period / PHASE_BINS * ENV_HOP, beat);
 	return 0;
+}
+
+/* ---- key detection ----------------------------------------------- */
+
+#define KEY_FFT_LOG	12
+#define KEY_FFT		(1 << KEY_FFT_LOG)
+#define KEY_HOP		(KEY_FFT / 2)
+#define KEY_RATE	11025
+
+struct cpx {
+	float re, im;
+};
+
+static void fft(struct cpx *x, int n)
+{
+	int i, j, k, m;
+
+	for (i = 1, j = 0; i < n; i++) {
+		int bit = n >> 1;
+
+		for (; j & bit; bit >>= 1)
+			j ^= bit;
+		j ^= bit;
+		if (i < j) {
+			struct cpx t = x[i];
+
+			x[i] = x[j];
+			x[j] = t;
+		}
+	}
+	for (m = 2; m <= n; m <<= 1) {
+		float ang = -2.0f * (float)M_PI / m;
+		struct cpx wm = { cosf(ang), sinf(ang) };
+
+		for (k = 0; k < n; k += m) {
+			struct cpx w = { 1.0f, 0.0f };
+
+			for (j = 0; j < m / 2; j++) {
+				struct cpx *a = &x[k + j], *b = &x[k + j + m / 2];
+				struct cpx t = { w.re * b->re - w.im * b->im,
+						 w.re * b->im + w.im * b->re };
+				struct cpx nw = { w.re * wm.re - w.im * wm.im,
+						  w.re * wm.im + w.im * wm.re };
+
+				b->re = a->re - t.re;
+				b->im = a->im - t.im;
+				a->re += t.re;
+				a->im += t.im;
+				w = nw;
+			}
+		}
+	}
+}
+
+/* Krumhansl-Kessler key profiles. */
+static const float major_profile[12] = {
+	6.35f, 2.23f, 3.48f, 2.33f, 4.38f, 4.09f,
+	2.52f, 5.19f, 2.39f, 3.66f, 2.29f, 2.88f,
+};
+static const float minor_profile[12] = {
+	6.33f, 2.68f, 3.52f, 5.38f, 2.60f, 3.53f,
+	2.54f, 4.75f, 3.98f, 2.69f, 3.34f, 3.17f,
+};
+
+static float correlate(const float *chroma, const float *profile, int shift)
+{
+	float mc = 0.0f, mp = 0.0f, num = 0.0f, da = 0.0f, db = 0.0f;
+	int i;
+
+	for (i = 0; i < 12; i++) {
+		mc += chroma[i];
+		mp += profile[i];
+	}
+	mc /= 12.0f;
+	mp /= 12.0f;
+	for (i = 0; i < 12; i++) {
+		float a = chroma[(i + shift) % 12] - mc;
+		float b = profile[i] - mp;
+
+		num += a * b;
+		da += a * a;
+		db += b * b;
+	}
+	return da > 0.0f && db > 0.0f ? num / sqrtf(da * db) : 0.0f;
+}
+
+int analyze_key(const struct track *t)
+{
+	size_t frames = track_frames(t), n, i, pos = 0;
+	unsigned int step = t->rate / KEY_RATE;
+	double chroma[12] = { 0 };
+	float chromaf[12];
+	struct cpx *buf;
+	float *win;
+	int k, best = -1;
+	float best_c = -1.0f;
+
+	if (step < 1)
+		step = 1;
+	n = frames / step;
+	if (n < 4 * KEY_FFT)
+		return -1;
+	buf = malloc(KEY_FFT * sizeof(*buf));
+	win = malloc(KEY_FFT * sizeof(*win));
+	if (!buf || !win) {
+		free(buf);
+		free(win);
+		return -1;
+	}
+	for (i = 0; i < KEY_FFT; i++)
+		win[i] = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * i / KEY_FFT);
+
+	/* Analyse up to four minutes from the middle of the track. */
+	if (n > (size_t)240 * KEY_RATE) {
+		pos = (n - (size_t)240 * KEY_RATE) / 2;
+		n = pos + (size_t)240 * KEY_RATE;
+	}
+	for (; pos + KEY_FFT <= n; pos += KEY_HOP) {
+		float fs = (float)t->rate / step;
+
+		for (i = 0; i < KEY_FFT; i++) {
+			const int16_t *f = track_frame(t, (pos + i) * step);
+
+			buf[i].re = (f[0] + f[1]) * (0.5f / 32768.0f) * win[i];
+			buf[i].im = 0.0f;
+		}
+		fft(buf, KEY_FFT);
+		for (i = 2; i < KEY_FFT / 2; i++) {
+			float hz = i * fs / KEY_FFT;
+			float mag, midi;
+			int pc;
+
+			if (hz < 55.0f || hz > 2000.0f)
+				continue;
+			mag = buf[i].re * buf[i].re + buf[i].im * buf[i].im;
+			midi = 69.0f + 12.0f * log2f(hz / 440.0f);
+			pc = ((int)lrintf(midi) % 12 + 12) % 12;
+			chroma[pc] += log1pf(mag * 1e3f);
+		}
+	}
+	free(buf);
+	free(win);
+
+	for (k = 0; k < 12; k++)
+		chromaf[k] = (float)chroma[k];
+	for (k = 0; k < 12; k++) {
+		float cm = correlate(chromaf, major_profile, k);
+		float cn = correlate(chromaf, minor_profile, k);
+
+		if (cm > best_c) {
+			best_c = cm;
+			best = k;
+		}
+		if (cn > best_c) {
+			best_c = cn;
+			best = 12 + k;
+		}
+	}
+	return best_c > 0.3f ? best : -1;
+}
+
+const char *key_name(int key)
+{
+	static const char *const names[24] = {
+		"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#",
+		"B", "Cm", "C#m", "Dm", "D#m", "Em", "Fm", "F#m", "Gm", "G#m",
+		"Am", "A#m", "Bm",
+	};
+
+	return key >= 0 && key < 24 ? names[key] : "";
+}
+
+const char *key_camelot(int key)
+{
+	static const char *const major[12] = {
+		"8B", "3B", "10B", "5B", "12B", "7B", "2B", "9B", "4B", "11B",
+		"6B", "1B",
+	};
+	static const char *const minor[12] = {
+		"5A", "12A", "7A", "2A", "9A", "4A", "11A", "6A", "1A", "8A",
+		"3A", "10A",
+	};
+
+	if (key < 0 || key >= 24)
+		return "";
+	return key < 12 ? major[key] : minor[key - 12];
+}
+
+int key_distance(int key, int target)
+{
+	int d;
+
+	if (key < 0 || target < 0 || (key < 12) != (target < 12))
+		return 0;
+	d = (target % 12) - (key % 12);
+	if (d > 6)
+		d -= 12;
+	if (d < -6)
+		d += 12;
+	return d;
+}
+
+/* ---- loudness ---------------------------------------------------- */
+
+float analyze_gain(const struct track *t)
+{
+	size_t frames = track_frames(t), i;
+	double sum = 0.0;
+	float rms_db;
+
+	if (frames == 0)
+		return 0.0f;
+	for (i = 0; i < frames; i += 4) {
+		const int16_t *f = track_frame(t, i);
+		double m = (f[0] + f[1]) * (0.5 / 32768.0);
+
+		sum += m * m;
+	}
+	rms_db = (float)(10.0 * log10(sum / (double)(frames / 4 + 1) + 1e-12));
+	return CLAMP(-18.0f - rms_db, -12.0f, 12.0f);
 }

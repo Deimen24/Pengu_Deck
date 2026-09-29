@@ -22,6 +22,8 @@ struct prefs {
 	GtkWidget *xf_curve;
 	GtkWidget *pitch_range;
 	GtkWidget *keylock;
+	GtkWidget *autogain;
+	GtkWidget *quantize;
 	GtkWidget *folders;
 	GtkWidget *record_dir;
 	GtkWidget *client_id;
@@ -62,8 +64,10 @@ static const char *const period_names[] = {
 	NULL,
 };
 static const unsigned int period_values[] = { 0, 64, 128, 256, 512, 1024 };
-static const char *const range_names[] = { "±8 %", "±16 %", "±50 %", NULL };
-static const int range_values[] = { 8, 16, 50 };
+static const char *const range_names[] = {
+	"±8 %", "±16 %", "±50 %", "±100 %", NULL,
+};
+static const int range_values[] = { 8, 16, 50, 100 };
 
 /* ---- helpers ----------------------------------------------------- */
 
@@ -330,6 +334,18 @@ static void on_apply(GtkButton *b, struct prefs *p)
 					GTK_DROP_DOWN(p->pitch_range))];
 	c->keylock = gtk_check_button_get_active(
 					GTK_CHECK_BUTTON(p->keylock));
+	c->autogain = gtk_check_button_get_active(
+					GTK_CHECK_BUTTON(p->autogain));
+	c->quantize = gtk_check_button_get_active(
+					GTK_CHECK_BUTTON(p->quantize));
+	{
+		int i;
+
+		for (i = 0; i < ENGINE_DECKS; i++) {
+			atomic_store(&a->engine.deck[i].autogain, c->autogain);
+			atomic_store(&a->engine.deck[i].quantize, c->quantize);
+		}
+	}
 	c->record_dir = g_strdup(gtk_editable_get_text(
 					GTK_EDITABLE(p->record_dir)));
 	c->sc_client_id = g_strdup(gtk_editable_get_text(
@@ -661,7 +677,8 @@ static void build_decks(struct prefs *p, GtkWidget *nb)
 {
 	struct config *c = &p->app->cfg;
 	GtkWidget *g = page(nb, "Decks");
-	guint sel = c->pitch_range == 16 ? 1 : c->pitch_range == 50 ? 2 : 0;
+	guint sel = c->pitch_range == 16 ? 1 : c->pitch_range == 50 ? 2 :
+		    c->pitch_range == 100 ? 3 : 0;
 
 	p->pitch_range = row(g, 0, "Pitch range", dropdown(range_names,
 							   sel));
@@ -671,6 +688,17 @@ static void build_decks(struct prefs *p, GtkWidget *nb)
 				    c->keylock);
 	gtk_widget_set_sensitive(p->keylock, deck_has_keylock());
 	row(g, 1, "", p->keylock);
+	p->autogain = gtk_check_button_new_with_label("Auto gain: level "
+						      "tracks to -18 dBFS RMS");
+	gtk_check_button_set_active(GTK_CHECK_BUTTON(p->autogain),
+				    c->autogain);
+	row(g, 2, "", p->autogain);
+	p->quantize = gtk_check_button_new_with_label("Quantize cues and "
+						      "loops to the beat "
+						      "grid by default");
+	gtk_check_button_set_active(GTK_CHECK_BUTTON(p->quantize),
+				    c->quantize);
+	row(g, 3, "", p->quantize);
 }
 
 void prefs_show(struct app *app, GCallback applied, gpointer data)

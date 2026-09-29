@@ -106,6 +106,61 @@ static void test_tempo_95(void)
 	check_tempo(95.0);
 }
 
+/* Chords of C major: expect C major (or its relative A minor). */
+static void test_key(void)
+{
+	struct track *t = track_new("mem", "mem", RATE);
+	size_t n = 30 * RATE, i;
+	int16_t *pcm = g_new0(int16_t, 2 * n);
+	static const double chords[4][3] = {
+		{ 261.63, 329.63, 392.00 },	/* C E G */
+		{ 349.23, 440.00, 523.25 },	/* F A C */
+		{ 392.00, 493.88, 587.33 },	/* G B D */
+		{ 261.63, 329.63, 392.00 },
+	};
+	int key;
+
+	for (i = 0; i < n; i++) {
+		const double *c = chords[(i / (4 * RATE)) % 4];
+		double v = 0.0;
+		int k;
+
+		for (k = 0; k < 3; k++)
+			v += sin(2 * M_PI * c[k] * i / RATE) +
+			     0.3 * sin(2 * M_PI * c[k] * 2 * i / RATE);
+		pcm[2 * i] = pcm[2 * i + 1] = (int16_t)(v * 4000.0);
+	}
+	track_append(t, pcm, n);
+	g_free(pcm);
+	key = analyze_key(t);
+	g_assert_true(key == 0 || key == 21);
+	g_assert_cmpstr(key_camelot(0), ==, "8B");
+	g_assert_cmpstr(key_camelot(21), ==, "8A");
+	g_assert_cmpstr(key_name(18), ==, "F#m");
+	g_assert_cmpint(key_distance(0, 2), ==, 2);
+	g_assert_cmpint(key_distance(0, 11), ==, -1);
+	g_assert_cmpint(key_distance(0, 21), ==, 0);
+	track_unref(t);
+}
+
+static void test_gain(void)
+{
+	struct track *t = track_new("mem", "mem", RATE);
+	size_t n = 5 * RATE, i;
+	int16_t *pcm = g_new0(int16_t, 2 * n);
+	float g;
+
+	/* full scale sine: -3 dBFS RMS, so the gain must be about -15 dB */
+	for (i = 0; i < n; i++)
+		pcm[2 * i] = pcm[2 * i + 1] =
+			(int16_t)(sin(2 * M_PI * 440 * i / RATE) * 32000);
+	track_append(t, pcm, n);
+	g_free(pcm);
+	g = analyze_gain(t);
+	g_assert_cmpfloat(fabsf(g + 12.0f), <, 0.5f);	/* clamped */
+	track_unref(t);
+}
+
 static void test_bpm_fold(void)
 {
 	g_assert_cmpfloat(bpm_fold(64.0), ==, 128.0);
@@ -358,6 +413,8 @@ int main(int argc, char **argv)
 	g_test_add_func("/analyze/174", test_tempo_174);
 	g_test_add_func("/analyze/95", test_tempo_95);
 	g_test_add_func("/analyze/fold", test_bpm_fold);
+	g_test_add_func("/analyze/key", test_key);
+	g_test_add_func("/analyze/gain", test_gain);
 	g_test_add_func("/dsp/biquad", test_biquad);
 	g_test_add_func("/deck/play", test_deck_play);
 	g_test_add_func("/deck/seek-loading", test_seek_while_loading);

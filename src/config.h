@@ -33,6 +33,7 @@ struct config {
 	int pitch_range;	/* percent: 8, 16 or 50 */
 	gboolean keylock;
 	gboolean quantize;
+	gboolean autogain;
 
 	/* automix */
 	int automix_fade;	/* seconds */

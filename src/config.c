@@ -100,6 +100,7 @@ void config_load(struct config *c)
 	c->pitch_range = get_int(kf, "decks", "pitch_range", 8);
 	c->keylock = get_int(kf, "decks", "keylock", 0);
 	c->quantize = get_int(kf, "decks", "quantize", 1);
+	c->autogain = get_int(kf, "decks", "autogain", 1);
 
 	c->automix_fade = CLAMP(get_int(kf, "automix", "fade", 12), 2, 90);
 	c->automix_sync = get_int(kf, "automix", "sync", 1);
@@ -108,7 +109,8 @@ void config_load(struct config *c)
 		c->backend = BACKEND_AUTO;
 	if (c->hp_mode < HP_OFF || c->hp_mode > HP_CH34)
 		c->hp_mode = HP_OFF;
-	if (c->pitch_range != 16 && c->pitch_range != 50)
+	if (c->pitch_range != 16 && c->pitch_range != 50 &&
+	    c->pitch_range != 100)
 		c->pitch_range = 8;
 	c->ndecks = CLAMP(c->ndecks, 2, ENGINE_DECKS);
 
@@ -145,6 +147,7 @@ void config_save(const struct config *c)
 	g_key_file_set_integer(kf, "decks", "pitch_range", c->pitch_range);
 	g_key_file_set_integer(kf, "decks", "keylock", c->keylock);
 	g_key_file_set_integer(kf, "decks", "quantize", c->quantize);
+	g_key_file_set_integer(kf, "decks", "autogain", c->autogain);
 
 	g_key_file_set_integer(kf, "automix", "fade", c->automix_fade);
 	g_key_file_set_integer(kf, "automix", "sync", c->automix_sync);
