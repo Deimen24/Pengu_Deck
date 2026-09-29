@@ -19,7 +19,6 @@
 @define-color hot #f472b6;
 @define-color rec #ef4444;
 @define-color list-bg #0e1118;
-@define-color list-alt #111520;
 
 * {
 	outline: none;
@@ -472,11 +471,6 @@ listview.queue-list > row {
 	padding: 1px 0;
 }
 
-columnview.data-table > listview > row:nth-child(even),
-listview.queue-list > row:nth-child(even) {
-	background: @list-alt;
-}
-
 columnview.data-table > listview > row:hover,
 listview.queue-list > row:hover {
 	background: #161a24;
@@ -659,6 +653,7 @@ popover > contents {
 
 columnview.data-table > listview > row {
 	min-height: 40px;
+	border-bottom: 1px solid #151923;
 }
 
 .row-title {
