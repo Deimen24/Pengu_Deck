@@ -1,11 +1,17 @@
 name: Release
 
-# Push a tag like v0.1.0 to build the packages for every distribution
-# and attach them to a GitHub Release.
+# Push a tag like v0.1.0, or run the workflow by hand with a version, to
+# build the packages for every distribution and attach them to a GitHub
+# Release.  A manual run creates the tag on the chosen commit itself.
 on:
   push:
     tags: ['v*']
   workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release tag to create (e.g. v0.1.0); empty = build only'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -97,9 +103,11 @@ jobs:
   release:
     name: Publish release
     needs: [arch, deb, rpm, flatpak]
-    # A manual run only builds the packages as artifacts.
-    if: startsWith(github.ref, 'refs/tags/')
+    # A manual run without a version only builds the artifacts.
+    if: startsWith(github.ref, 'refs/tags/') || inputs.version != ''
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || inputs.version }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -108,7 +116,9 @@ jobs:
         run: find packages -type f
       - uses: softprops/action-gh-release@v2
         with:
-          name: Pengu Deck ${{ github.ref_name }}
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: Pengu Deck ${{ env.TAG }}
           generate_release_notes: true
           files: |
             packages/arch/*
