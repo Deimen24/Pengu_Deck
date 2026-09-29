@@ -838,3 +838,15 @@ button.destructive {
 	color: @rec;
 	border-color: alpha(@rec, 0.5);
 }
+
+button.live:checked {
+	background: #f97316;
+	color: #1c0a00;
+	box-shadow: 0 0 14px alpha(#f97316, 0.8);
+}
+
+button.mic:checked {
+	background: #a3e635;
+	color: #14200a;
+	box-shadow: 0 0 12px alpha(#a3e635, 0.7);
+}
