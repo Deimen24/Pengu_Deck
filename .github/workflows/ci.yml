@@ -16,7 +16,7 @@ jobs:
           pacman -Syu --noconfirm --needed git meson ninja pkgconf gtk4 \
             glib2 json-glib curl ffmpeg rubberband libpulse alsa-lib \
             webkitgtk-6.0 desktop-file-utils
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build
         run: |
           meson setup build -Dkeylock=enabled
@@ -29,7 +29,7 @@ jobs:
           chown -R builder .
           su builder -c 'cd packaging/arch && makepkg -f --noconfirm'
           ls packaging/arch/*.pkg.tar.*
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: pengu-deck-arch
           path: packaging/arch/*.pkg.tar.*
@@ -38,7 +38,7 @@ jobs:
     name: Ubuntu 24.04 (Debian package)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -57,7 +57,7 @@ jobs:
         run: |
           dpkg-buildpackage -us -uc -b
           mkdir -p dist && mv ../pengu-deck_*.deb dist/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: pengu-deck-deb
           path: dist/*.deb
@@ -73,7 +73,7 @@ jobs:
             glib2-devel json-glib-devel libcurl-devel rubberband-devel \
             pulseaudio-libs-devel alsa-lib-devel webkitgtk6.0-devel \
             desktop-file-utils rpm-build git ffmpeg-free-devel
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Build and test
         run: |
           meson setup build -Dkeylock=enabled
@@ -86,7 +86,7 @@ jobs:
           git archive --prefix=Pengu_Deck-0.1.1/ -o ~/rpmbuild/SOURCES/Pengu_Deck-0.1.1.tar.gz HEAD
           rpmbuild -bb packaging/fedora/pengu-deck.spec
           ls ~/rpmbuild/RPMS/*/
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         with:
           name: pengu-deck-rpm
           path: ~/rpmbuild/RPMS/*/*.rpm
@@ -98,7 +98,7 @@ jobs:
       image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-47
       options: --privileged
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: flathub-infra/flatpak-github-actions/flatpak-builder@master
         with:
           bundle: pengu-deck.flatpak
