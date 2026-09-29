@@ -283,6 +283,27 @@ static void bind_key(GtkWidget *l, PdMediaItem *m)
 	gtk_widget_add_css_class(l, cls);
 }
 
+/*
+ * Played tracks are styled as whole rows: flag the cell and the row
+ * widget that holds it, so the stylesheet can tint the entire line.
+ */
+static void mark_played(GtkWidget *cell, gboolean played)
+{
+	GtkWidget *w = cell;
+
+	for (;;) {
+		if (played)
+			gtk_widget_add_css_class(w, "played");
+		else
+			gtk_widget_remove_css_class(w, "played");
+		if (g_strcmp0(gtk_widget_get_css_name(w), "row") == 0)
+			return;
+		w = gtk_widget_get_parent(w);
+		if (!w || GTK_IS_COLUMN_VIEW(w))
+			return;
+	}
+}
+
 static void bind_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 {
 	PdMediaItem *m = gtk_list_item_get_item(li);
@@ -292,15 +313,12 @@ static void bind_cell(GtkListItemFactory *f, GtkListItem *li, gpointer data)
 	gboolean played = app_item_played(v->app, m);
 	char *tmp = NULL;
 
-	if (played)
-		gtk_widget_add_css_class(w, "played");
-	else
-		gtk_widget_remove_css_class(w, "played");
+	mark_played(w, played);
 
 	switch (col) {
 	case COL_STATE: {
 		int pc = sccache_progress(m);
-		GString *s = g_string_new(played ? "✓" : "");
+		GString *s = g_string_new("");
 
 		if (pc == 100)
 			g_string_append(s, " ⬇");
