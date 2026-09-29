@@ -230,14 +230,27 @@ static gboolean token_request(const char *grant, gboolean user, GError **err)
 {
 	char *id = g_uri_escape_string(ses.client_id, NULL, FALSE);
 	char *secret = g_uri_escape_string(ses.client_secret, NULL, FALSE);
-	char *form = g_strdup_printf("%s&client_id=%s&client_secret=%s",
-				     grant, id, secret);
-	char *reply = NULL, *body;
+	char *form, *basic = NULL, *reply = NULL, *body;
 	struct sc_tokens t = { 0 };
 	long status = 0;
 	gboolean ok = FALSE;
 
-	body = net_post_form(TOKEN_URL, form, NULL, &status, &reply, err);
+	if (g_str_has_prefix(grant, "grant_type=client_credentials")) {
+		/* this grant takes the credentials as HTTP Basic only */
+		char *pair = g_strdup_printf("%s:%s", ses.client_id,
+					     ses.client_secret);
+		char *b64 = g_base64_encode((const guchar *)pair,
+					    strlen(pair));
+
+		basic = g_strdup_printf("Basic %s", b64);
+		form = g_strdup(grant);
+		g_free(b64);
+		g_free(pair);
+	} else {
+		form = g_strdup_printf("%s&client_id=%s&client_secret=%s",
+				       grant, id, secret);
+	}
+	body = net_post_form(TOKEN_URL, form, basic, &status, &reply, err);
 	if (!body) {
 		if (reply && sc_parse_token_reply(reply, &t, NULL)) {
 			/* not reachable: an error status with a token */
@@ -280,6 +293,7 @@ out:
 	g_free(body);
 	g_free(reply);
 	g_free(form);
+	g_free(basic);
 	g_free(secret);
 	g_free(id);
 	return ok;
