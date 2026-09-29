@@ -32,6 +32,11 @@ static const char *token_url(void)
 #define ACCESS		"access=playable,preview"
 /* refresh this long before the token actually expires */
 #define EXPIRY_MARGIN	60
+/* after a failed token exchange, wait this long before asking again:
+ * the exchange is rate limited per app and per address */
+#define TOKEN_COOLDOWN	60
+/* HTTP 429: back off 1, 2, 4 seconds, then give up */
+#define BACKOFF_TRIES	3
 
 G_DEFINE_QUARK(pd-soundcloud-error-quark, sc_error)
 
@@ -106,6 +111,8 @@ static struct {
 	char *client_id;
 	char *client_secret;
 	struct sc_tokens t;
+	gint64 failed_at;	/* last failed exchange, unix seconds */
+	char *failed_why;
 	void (*changed)(gpointer data);
 	gpointer changed_data;
 } ses;
@@ -143,7 +150,15 @@ void sc_session_set_app(const char *client_id, const char *client_secret)
 {
 	gboolean same;
 
+	/* the environment wins, so credentials need not live in a file */
+	if (g_getenv("SOUNDCLOUD_CLIENT_ID") && *g_getenv("SOUNDCLOUD_CLIENT_ID"))
+		client_id = g_getenv("SOUNDCLOUD_CLIENT_ID");
+	if (g_getenv("SOUNDCLOUD_CLIENT_SECRET") &&
+	    *g_getenv("SOUNDCLOUD_CLIENT_SECRET"))
+		client_secret = g_getenv("SOUNDCLOUD_CLIENT_SECRET");
 	g_mutex_lock(&ses.lock);
+	ses.failed_at = 0;
+	g_clear_pointer(&ses.failed_why, g_free);
 	same = g_strcmp0(client_id, ses.client_id) == 0 &&
 	       g_strcmp0(client_secret, ses.client_secret) == 0;
 	g_free(ses.client_id);
@@ -250,6 +265,7 @@ static gboolean token_request(const char *grant, gboolean user, GError **err)
 	struct sc_tokens t = { 0 };
 	long status = 0;
 	gboolean ok = FALSE;
+	int try;
 
 	if (g_str_has_prefix(grant, "grant_type=client_credentials")) {
 		/* this grant takes the credentials as HTTP Basic only */
@@ -266,7 +282,21 @@ static gboolean token_request(const char *grant, gboolean user, GError **err)
 		form = g_strdup_printf("%s&client_id=%s&client_secret=%s",
 				       grant, id, secret);
 	}
-	body = net_post_form(token_url(), form, basic, &status, &reply, err);
+	for (try = 0; ; try++) {
+		g_clear_error(err);
+		g_clear_pointer(&reply, g_free);
+		body = net_post_form(token_url(), form, basic, &status, &reply,
+				     err);
+		if (body || status != 429 || try + 1 >= BACKOFF_TRIES)
+			break;
+		g_usleep((gulong)(1 << try) * G_USEC_PER_SEC);
+	}
+	if (!body && status == 429) {
+		g_clear_error(err);
+		g_set_error_literal(err, SC_ERROR, SC_ERROR_AUTH,
+				    "SoundCloud is rate limiting token "
+				    "requests, try again in a while");
+	}
 	if (!body) {
 		if (reply && sc_parse_token_reply(reply, &t, NULL)) {
 			/* not reachable: an error status with a token */
@@ -305,6 +335,15 @@ static gboolean token_request(const char *grant, gboolean user, GError **err)
 	notify_changed();
 	ok = TRUE;
 out:
+	if (!ok) {
+		ses.failed_at = g_get_real_time() / G_USEC_PER_SEC;
+		g_free(ses.failed_why);
+		ses.failed_why = g_strdup(err && *err ? (*err)->message :
+					  "token request failed");
+	} else {
+		ses.failed_at = 0;
+		g_clear_pointer(&ses.failed_why, g_free);
+	}
 	sc_tokens_clear(&t);
 	g_free(body);
 	g_free(reply);
@@ -368,6 +407,12 @@ char *sc_session_token(GError **err)
 	}
 	if (token_valid())
 		goto done;
+	if (ses.failed_at &&
+	    g_get_real_time() / G_USEC_PER_SEC < ses.failed_at + TOKEN_COOLDOWN) {
+		g_set_error(err, SC_ERROR, SC_ERROR_AUTH, "%s (retrying in a "
+			    "minute)", ses.failed_why);
+		goto out;
+	}
 	/* refresh tokens are single use: one refresh at a time, in here */
 	if (ses.t.refresh) {
 		char *r = g_uri_escape_string(ses.t.refresh, NULL, FALSE);
@@ -441,7 +486,18 @@ static char *api_get(const char *url, GError **err)
 		if (!token)
 			return NULL;
 		hdr = g_strdup_printf("OAuth %s", token);
-		body = net_get(url, hdr, &status, err);
+		{
+			int try;
+
+			for (try = 0; ; try++) {
+				g_clear_error(err);
+				body = net_get(url, hdr, &status, err);
+				if (body || status != 429 ||
+				    try + 1 >= BACKOFF_TRIES)
+					break;
+				g_usleep((gulong)(1 << try) * G_USEC_PER_SEC);
+			}
+		}
 		g_free(hdr);
 		if (body) {
 			g_free(token);
@@ -636,23 +692,17 @@ GPtrArray *sc_resolve(const char *link, GError **err)
 		res = g_ptr_array_new_with_free_func(g_object_unref);
 		add_track_node(res, root);
 	} else if (kind && strcmp(kind, "playlist") == 0 && urn) {
-		char *u = g_uri_escape_string(urn, NULL, FALSE);
-
 		url = g_strdup_printf("%s/playlists/%s/tracks?" ACCESS
 				      "&linked_partitioning=true", api_base(),
-				      u);
+				      urn);
 		res = fetch_tracks(url, err);
 		g_free(url);
-		g_free(u);
 	} else if (kind && strcmp(kind, "user") == 0 && urn) {
-		char *u = g_uri_escape_string(urn, NULL, FALSE);
-
 		url = g_strdup_printf("%s/users/%s/tracks?" ACCESS
 				      "&limit=%d&linked_partitioning=true",
-				      api_base(), u, PAGE_LIMIT);
+				      api_base(), urn, PAGE_LIMIT);
 		res = fetch_tracks(url, err);
 		g_free(url);
-		g_free(u);
 	} else {
 		g_set_error(err, SC_ERROR, SC_ERROR_NOT_FOUND,
 			    "That link is not a SoundCloud track, playlist "
@@ -688,7 +738,6 @@ static const char *const stream_keys[] = {
 
 char *sc_stream_url(PdMediaItem *m, GError **err)
 {
-	const char *u;
 	char *url, *body, *res = NULL;
 	JsonNode *root;
 	JsonObject *o;
@@ -701,10 +750,9 @@ char *sc_stream_url(PdMediaItem *m, GError **err)
 			    "country)", m->title);
 		return NULL;
 	}
-	/* the guide writes the numeric id in the path */
-	u = strrchr(m->location, ':');
+	/* the spec puts the urn in the path as is: colons and all */
 	url = g_strdup_printf("%s/tracks/%s/streams", api_base(),
-			      u ? u + 1 : m->location);
+			      m->location);
 	body = api_get(url, err);
 	g_free(url);
 	if (!body)

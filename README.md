@@ -136,8 +136,17 @@ own registered at
    OAuth 2.1 with PKCE; your password never passes through the app.
 
 Then search, or paste a track, set or artist link. Your likes load
-with the **♥ Likes** button. Tokens are refreshed automatically and
-kept in `~/.config/pengu-deck/settings.ini`. Streams are cached to
+with the **♥ Likes** button. Streaming needs the login; search and
+links work with the app credentials alone. Tokens are refreshed
+automatically and kept in `~/.config/pengu-deck/settings.ini`; the
+credentials can also come from the environment as
+`SOUNDCLOUD_CLIENT_ID` and `SOUNDCLOUD_CLIENT_SECRET`. Rate limits are
+respected: a 429 is retried with exponential backoff, and a failed
+token exchange is not repeated for a minute.
+
+SoundCloud's API terms ask for attribution when streaming: the list
+names the uploader, marks tracks as SoundCloud, and "Open on
+SoundCloud" in the context menu links to the track page. Streams are cached to
 `~/.cache/pengu-deck/soundcloud/` while playing; cached tracks show ⬇
 and the cache can be cleared in Preferences. Tracks limited to previews
 by their rights holders play as 30 s snippets and are marked
